@@ -3,15 +3,14 @@ name: browse-multi
 description: |
   Concurrent browser automation via persistent headless Chromium daemons with CLI interface.
   Each agent gets its own named instance (~200ms/command after first call).
+  DEFAULT tool for all agent browsing. Every agent and sub-agent that needs to browse
+  the web MUST use browse-multi, not Playwright MCP. Playwright MCP is reserved for
+  the user's interactive use only (logging in, exporting session cookies).
   Use when an agent or sub-agent needs to browse the web, scrape a page, interact with a site,
-  fill forms, take screenshots, or extract content — especially when multiple agents need to
-  browse concurrently. Triggers on: "browse this site," "scrape this page," "navigate to,"
-  "check this URL," "take a screenshot of," "fill out this form," "read this page," or any
-  task where a sub-agent needs web access beyond what WebFetch provides (JS-heavy sites,
-  authenticated pages, multi-step interactions). Also use when spawning parallel research
-  agents that each need their own browser.
-  Do NOT use for: simple URL fetching where WebFetch works (static pages, APIs), interactive
-  browsing where the user is driving (use Playwright MCP instead).
+  fill forms, take screenshots, or extract content. Triggers on: "browse this site,"
+  "scrape this page," "navigate to," "check this URL," "take a screenshot of,"
+  "fill out this form," "read this page," or any task requiring web access beyond WebFetch.
+  Do NOT use for: simple URL fetching where WebFetch works (static pages, APIs).
 allowed-tools:
   - Bash
   - Read
@@ -26,6 +25,7 @@ named instance. First call auto-starts the browser (~3s). Subsequent commands
 ## Routing
 
 **Use when:**
+- ANY agent or sub-agent needs to browse the web (this is the default, not Playwright MCP)
 - A sub-agent needs to browse a JS-heavy or authenticated website
 - Multiple agents need concurrent browser access (each gets its own instance)
 - You need to interact with a page: click buttons, fill forms, navigate flows
@@ -34,8 +34,11 @@ named instance. First call auto-starts the browser (~3s). Subsequent commands
 
 **Don't use when:**
 - A simple `WebFetch` can get the content (static HTML, public APIs)
-- The user is interactively browsing — use Playwright MCP instead
+- The user is personally/interactively browsing — use Playwright MCP instead
 - You just need to download a file — use `curl` or `WebFetch`
+
+**Playwright MCP is for the user only** — logging into sites and exporting session
+cookies. Agents must never call Playwright MCP tools directly.
 
 ## Setup
 
