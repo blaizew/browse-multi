@@ -20,11 +20,13 @@ Install browse-multi: run git clone https://github.com/blaizew/browse-multi.git 
 
 Claude will clone the repo, install Chromium, register the MCP server, and set up skill routing. After restarting Claude Code, browse-multi is ready to use.
 
+If `claude mcp add` fails from inside Claude Code, the setup script will print a command to run in a separate terminal.
+
 ### What the setup does
 
-1. `npm install` — installs Playwright and downloads Chromium
+1. `npm install` — installs Playwright and downloads Chromium locally
 2. `claude mcp add` — registers the MCP server so instances can start outside the sandbox
-3. Copies the skill file so Claude Code knows when and how to use browse-multi
+3. The skill file (`SKILL.md`) at the repo root tells Claude Code when and how to use browse-multi
 
 ## Quick start
 
