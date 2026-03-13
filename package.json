@@ -1,0 +1,37 @@
+{
+  "name": "browse-multi",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Concurrent headless browser automation for AI coding agents",
+  "bin": {
+    "browse-multi": "./browse-multi.js"
+  },
+  "scripts": {
+    "postinstall": "npx playwright install chromium",
+    "test": "bash test-smoke.sh"
+  },
+  "dependencies": {
+    "playwright": "1.52.0"
+  },
+  "keywords": [
+    "browser",
+    "automation",
+    "headless",
+    "chromium",
+    "playwright",
+    "ai",
+    "agent",
+    "mcp",
+    "claude-code",
+    "cursor",
+    "copilot"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/blaizew/browse-multi.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
