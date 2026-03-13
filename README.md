@@ -36,6 +36,71 @@ npm install -g .
 browse-multi --name myagent goto https://example.com
 ```
 
+## MCP server (required for sandboxed environments)
+
+browse-multi ships with an MCP server that manages instance lifecycle (start/stop/status). **This is not optional** — it's the primary way to use browse-multi with Claude Code and other sandboxed AI coding tools.
+
+### Why MCP?
+
+Claude Code runs Bash commands inside a macOS Seatbelt sandbox that blocks Chromium from launching (specifically, Mach port registration is denied). The MCP server runs outside the sandbox as a separate process, so it can start Chromium instances. Once an instance is running, all browse commands go through Bash as HTTP requests to `127.0.0.1` — which works fine from inside the sandbox.
+
+```
+┌─────────────────────────────────────────────┐
+│  Claude Code sandbox                         │
+│                                              │
+│  Bash: browse-multi --name a1 goto URL  ────────▶ HTTP to 127.0.0.1:9400
+│  Bash: browse-multi --name a1 text      ────────▶ HTTP to 127.0.0.1:9400
+│                                              │
+└─────────────────────────────────────────────┘
+                                                         │
+┌─────────────────────────────────────────────┐          │
+│  Outside sandbox (MCP server)                │          │
+│                                              │          ▼
+│  browse_start(name: "a1") ──▶ spawns ──▶ Chromium daemon on :9400
+│  browse_stop(name: "a1")                     │
+│  browse_status()                             │
+└─────────────────────────────────────────────┘
+```
+
+### Setup
+
+Register the MCP server with Claude Code:
+
+```bash
+claude mcp add browse-multi -- node /path/to/browse-multi/browse-multi-mcp.js
+```
+
+Then restart Claude Code. The MCP tools will be available immediately.
+
+### Usage flow
+
+1. **Start an instance** via MCP (outside sandbox):
+   ```
+   browse_start(name: "research")
+   browse_start(name: "agent1", session: "/path/to/cookies.json", headed: true)
+   ```
+
+2. **Send commands** via Bash (inside sandbox):
+   ```bash
+   browse-multi --name research goto https://example.com
+   browse-multi --name research text
+   browse-multi --name research screenshot ./page.png
+   ```
+
+3. **Stop when done** via MCP:
+   ```
+   browse_stop(name: "research")
+   browse_stop()  # stop all
+   ```
+
+### MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `browse_start` | Start a named Chromium instance (params: `name`, `session?`, `headed?`) |
+| `browse_stop` | Stop an instance or all instances (params: `name?`) |
+| `browse_status` | List all running instances with port, PID, and health |
+
 ## Architecture
 
 ```
@@ -251,44 +316,6 @@ browse-multi --name debug --headed goto https://example.com
 ```
 
 On macOS, browser windows are automatically sent to background after launch so they don't steal focus. Bring them forward via Cmd+Tab when needed.
-
-## MCP server (Claude Code integration)
-
-browse-multi includes an MCP server for Claude Code (and other MCP-compatible tools). The MCP server handles instance lifecycle (start/stop/status), while browse commands go through normal Bash calls.
-
-This is particularly useful when running inside a sandbox that blocks Chromium from launching directly -- the MCP server runs outside the sandbox and can start browser instances, while HTTP commands to already-running instances work fine from within the sandbox.
-
-### Setup
-
-Add to your Claude Code MCP config:
-
-```json
-{
-  "mcpServers": {
-    "browse-multi": {
-      "command": "node",
-      "args": ["/path/to/browse-multi/browse-multi-mcp.js"]
-    }
-  }
-}
-```
-
-### MCP tools
-
-| Tool | Description |
-|------|-------------|
-| `browse_start` | Start a named instance (params: `name`, `session?`, `headed?`) |
-| `browse_stop` | Stop an instance or all (params: `name?`) |
-| `browse_status` | List running instances |
-
-After starting an instance via MCP, send commands through Bash:
-
-```bash
-# MCP: browse_start(name: "research")
-# Then in Bash:
-browse-multi --name research goto https://example.com
-browse-multi --name research text
-```
 
 ## Concurrency
 
