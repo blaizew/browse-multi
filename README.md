@@ -12,24 +12,19 @@ browse-multi solves this with **named instances**. Each agent gets its own persi
 
 ## Install
 
-### As a Claude Code plugin (recommended)
+Open Claude Code and paste this:
 
-```bash
-claude plugin install browse-multi@blaizew
+```
+Install browse-multi: run git clone https://github.com/blaizew/browse-multi.git ~/.claude/skills/browse-multi && cd ~/.claude/skills/browse-multi && ./setup
 ```
 
-This registers the MCP server, skill routing, and CLI automatically. Claude Code will know when and how to use browse-multi without any manual configuration.
+Claude will clone the repo, install Chromium, register the MCP server, and set up skill routing. After restarting Claude Code, browse-multi is ready to use.
 
-### Manual setup
+### What the setup does
 
-```bash
-git clone https://github.com/blaizew/browse-multi.git
-cd browse-multi
-npm install
-
-# Register the MCP server
-claude mcp add browse-multi -- node /path/to/browse-multi/browse-multi-mcp.js
-```
+1. `npm install` — installs Playwright and downloads Chromium
+2. `claude mcp add` — registers the MCP server so instances can start outside the sandbox
+3. Copies the skill file so Claude Code knows when and how to use browse-multi
 
 ## Quick start
 

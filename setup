@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo "Installing dependencies and Chromium..."
+cd "$SCRIPT_DIR"
+npm install
+
+echo "Registering MCP server..."
+claude mcp add browse-multi -- node "$SCRIPT_DIR/browse-multi-mcp.js"
+
+echo ""
+echo "browse-multi installed successfully."
+echo "Restart Claude Code to activate the MCP server."
+echo ""
+echo "Once restarted, Claude will automatically use browse-multi when agents need browser access."
