@@ -150,30 +150,64 @@ browse-multi stop --all                # stop all
 navigation (`goto`, `back`, `reload`), which clears them. Always re-snapshot
 after navigating.
 
-## Authenticated Browsing
+## Session Import (Authenticated Browsing)
 
-Import session cookies for authenticated sites:
+**IMPORTANT:** browse-multi instances do NOT inherit Playwright MCP's login sessions
+automatically. Before spawning sub-agents that need to browse authenticated sites,
+the master agent MUST export session cookies and pass them explicitly.
+
+### Automatic export workflow (master agent responsibility)
+
+Before launching sub-agents that will browse authenticated sites:
+
+1. **Check if a session file already exists** for the target site:
+   ```bash
+   ls *-session.json
+   ```
+
+2. **If no session file exists, export it from Playwright MCP:**
+   ```
+   mcp__playwright__browser_navigate(url: "https://target-site.com")
+   mcp__playwright__browser_run_code(code: "async (page) => { const state = await page.context().storageState(); return JSON.stringify(state); }")
+   ```
+   Then save the output to a session file (e.g., `<site>-session.json`) using the Write tool.
+
+3. **Pass the session file when starting browse-multi for sub-agents:**
+   ```
+   mcp__browse-multi__browse_start(name: "agent-name", session: "/path/to/<site>-session.json")
+   ```
+
+4. **Include in sub-agent prompts:**
+   > For browsing <site>, the browse-multi instance "agent-name" is already started
+   > with session cookies. Use `browse-multi --name agent-name <command>` via Bash.
+
+If a session file is missing or auth fails, export a fresh one using the workflow above.
+
+### Manual login workflow
+
+Alternatively, log in manually in headed mode and export the session:
 
 ```bash
-# 1. Log in manually in headed mode
 browse-multi --name login --headed goto https://mysite.com
-# ... log in ...
+# ... log in in the browser window ...
 browse-multi --name login export-session > mysite-session.json
 browse-multi --name login stop
 
-# 2. Start agents with the session
+# Start agents with the session
 mcp__browse-multi__browse_start(name: "agent1", session: "mysite-session.json")
 browse-multi --name agent1 goto https://mysite.com/dashboard
 ```
 
-Or export from Playwright MCP if available:
-```javascript
-// In browser_run_code:
-async (page) => {
-  const state = await page.context().storageState();
-  return JSON.stringify(state);
-}
-```
+### Session lifecycle
+
+`--session` only applies when the instance starts. To refresh expired sessions:
+stop the instance and start again with an updated session file.
+
+**Known limitations:**
+- Fingerprint-based auth (device binding, TLS fingerprinting) may not transfer.
+  Cookie-based auth (most sites) works fine.
+- Some sites with aggressive bot detection can invalidate sessions after certain
+  interactions (scrolling, rapid navigation). Initial page loads work reliably.
 
 ## Concurrency
 
