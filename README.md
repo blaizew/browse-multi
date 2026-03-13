@@ -10,14 +10,30 @@ AI coding assistants (Claude Code, Cursor, Copilot, Windsurf, etc.) often need t
 
 browse-multi solves this with **named instances**. Each agent gets its own persistent Chromium process, accessed via simple CLI commands or an MCP server. No shared state, no conflicts, up to 21 concurrent instances.
 
-## Quick start
+## Install
+
+### As a Claude Code plugin (recommended)
 
 ```bash
-# Install
+claude plugin install browse-multi@blaizew
+```
+
+This registers the MCP server, skill routing, and CLI automatically. Claude Code will know when and how to use browse-multi without any manual configuration.
+
+### Manual setup
+
+```bash
 git clone https://github.com/blaizew/browse-multi.git
 cd browse-multi
 npm install
 
+# Register the MCP server
+claude mcp add browse-multi -- node /path/to/browse-multi/browse-multi-mcp.js
+```
+
+## Quick start
+
+```bash
 # Browse
 browse-multi --name agent1 goto https://example.com
 browse-multi --name agent1 text
@@ -27,13 +43,6 @@ browse-multi --name agent1 screenshot ./page.png
 browse-multi --name agent2 goto https://docs.python.org
 browse-multi --name agent2 snapshot -i
 browse-multi --name agent2 click @e3
-```
-
-Or with `npx` after a global install:
-
-```bash
-npm install -g .
-browse-multi --name myagent goto https://example.com
 ```
 
 ## MCP server (required for sandboxed environments)

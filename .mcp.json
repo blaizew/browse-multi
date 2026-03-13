@@ -1,0 +1,7 @@
+{
+  "browse-multi": {
+    "type": "stdio",
+    "command": "node",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/browse-multi-mcp.js"]
+  }
+}

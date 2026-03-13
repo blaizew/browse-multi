@@ -1,0 +1,22 @@
+{
+  "name": "browse-multi",
+  "version": "1.0.0",
+  "description": "Concurrent headless browser automation for AI coding agents. Named Chromium instances with MCP lifecycle management for sandboxed environments.",
+  "author": {
+    "name": "Blaize Wallace",
+    "email": "blaizew@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/blaizew/browse-multi",
+  "repository": "https://github.com/blaizew/browse-multi",
+  "license": "MIT",
+  "keywords": [
+    "browser",
+    "automation",
+    "headless",
+    "chromium",
+    "playwright",
+    "mcp",
+    "multi-agent",
+    "concurrent"
+  ]
+}
