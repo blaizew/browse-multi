@@ -31,11 +31,16 @@ if (sessIdx !== -1 && sessIdx + 1 < rawArgs.length) {
   rawArgs.splice(sessIdx, 2);
 }
 
-// Extract --headed
-let headed = false;
+// Extract --headless (default is headed)
+let headed = true;
+const headlessIdx = rawArgs.indexOf('--headless');
+if (headlessIdx !== -1) {
+  headed = false;
+  rawArgs.splice(headlessIdx, 1);
+}
+// Legacy --headed flag (no-op, already default)
 const headedIdx = rawArgs.indexOf('--headed');
 if (headedIdx !== -1) {
-  headed = true;
   rawArgs.splice(headedIdx, 1);
 }
 
@@ -56,6 +61,29 @@ if (command === 'help' || !command) {
 // stop --all doesn't need --name
 if (command === 'stop' && (commandArgs.includes('--all') || rawArgs.includes('--all'))) {
   await handleStopAll();
+  process.exit(0);
+}
+
+// login command — auto-generates name, starts headed, navigates
+if (command === 'login') {
+  const url = commandArgs[0];
+  if (!url) {
+    console.error('Usage: browse-multi login <url>');
+    process.exit(1);
+  }
+  let domain;
+  try { domain = new URL(url).hostname.replace(/^www\./, ''); } catch {
+    console.error(`Invalid URL: ${url}`);
+    process.exit(1);
+  }
+  const loginName = name || `login-${domain}`;
+  await ensureServer(loginName, null, true);
+  const loginState = readState(loginName);
+  await sendCommand(loginState.port, loginState.token, 'goto', [url]);
+  console.log(`Headed browser opened at ${url}`);
+  console.log(`Instance: ${loginName}`);
+  console.log(`\nLog in to ${domain}, then run:`);
+  console.log(`  node ${process.argv[1]} --name ${loginName} save-session`);
   process.exit(0);
 }
 
@@ -273,6 +301,6 @@ Interaction:  click <sel|@ref> | fill <sel|@ref> <val> | type <text> | press <ke
 Inspection:   js <expr> | eval (stdin) | console | network
 Visual:       screenshot [path]
 Tabs:         tabs | tab <id> | newtab [url] | closetab [id]
-Session:      export-session | start [--session file] | stop | stop --all
+Session:      export-session | save-session [domain] | login <url> | start [--session file] | stop | stop --all
 Instance:     status | chain [--timeout ms] | help`);
 }

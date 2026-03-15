@@ -106,6 +106,8 @@ Then restart Claude Code. The MCP tools will be available immediately.
 | `browse_start` | Start a named Chromium instance (params: `name`, `session?`, `headed?`) |
 | `browse_stop` | Stop an instance or all instances (params: `name?`) |
 | `browse_status` | List all running instances with port, PID, and health |
+| `browse_login` | Open a headed browser for user to log in (params: `url`) |
+| `browse_login_complete` | Save session cookies and close login browser (params: `name?`, `domain?`) |
 
 ## Architecture
 
@@ -245,13 +247,18 @@ browse-multi --name a1 closetab 1
 | Command | Description |
 |---------|-------------|
 | `export-session` | Export cookies and storage state as JSON |
-| `start [--session file] [--headed]` | Start instance without running a command |
+| `save-session [domain]` | Export and save to `~/.claude/sessions/<domain>.json` |
+| `login <url>` | Open headed browser for manual login |
+| `start [--session file]` | Start instance without running a command |
 | `stop` | Stop an instance |
 | `stop --all` | Stop all instances |
 
 ```bash
-browse-multi --name a1 export-session > session.json
-browse-multi --name a1 start --session session.json
+browse-multi login https://mysite.com/login        # headed browser for login
+browse-multi --name login-mysite.com save-session   # save to ~/.claude/sessions/mysite.com.json
+browse-multi --name login-mysite.com stop
+browse-multi --name a1 start --session ~/.claude/sessions/mysite.com.json
+browse-multi --name a1 export-session > session.json  # raw JSON to stdout
 browse-multi --name a1 stop
 browse-multi stop --all
 ```
@@ -296,32 +303,63 @@ $ browse-multi --name a1 fill @e3 "search query"
 
 ## Authenticated browsing
 
-Import session cookies from an existing browser to access authenticated sites:
+Sessions are stored in `~/.claude/sessions/<domain>.json` and can be shared across instances.
+
+### Login flow (MCP)
+
+```
+browse_login(url: "https://mysite.com/login")     # opens headed browser
+# ... user logs in ...
+browse_login_complete()                             # saves to ~/.claude/sessions/mysite.com.json
+```
+
+### Login flow (CLI)
 
 ```bash
-# 1. Export session from an authenticated browser
-#    (e.g., from Playwright MCP, or use export-session from an already-logged-in instance)
-browse-multi --name login goto https://mysite.com
-# ... log in manually in headed mode ...
-browse-multi --name login export-session > mysite-session.json
-browse-multi --name login stop
+browse-multi login https://mysite.com/login                  # opens headed browser
+# ... log in manually ...
+browse-multi --name login-mysite.com save-session             # saves session
+browse-multi --name login-mysite.com stop
+```
 
-# 2. Start new instances with the session
-browse-multi --name agent1 start --session mysite-session.json
+### Using saved sessions
+
+```bash
+# Via MCP
+browse_start(name: "agent1", session: "~/.claude/sessions/mysite.com.json")
+
+# Via CLI
+browse-multi --name agent1 start --session ~/.claude/sessions/mysite.com.json
 browse-multi --name agent1 goto https://mysite.com/dashboard
 ```
 
-The `--session` flag only applies when starting a new instance. To refresh expired sessions, stop the instance and start again with an updated session file.
+The `--session` flag only applies when starting a new instance. To refresh expired sessions, stop the instance, re-login, and start again with the updated session file.
 
-## Headed mode
+### Legacy: manual export
 
-Add `--headed` to see the browser window:
+You can also export raw session JSON to stdout:
 
 ```bash
-browse-multi --name debug --headed goto https://example.com
+browse-multi --name login goto https://mysite.com
+# ... log in manually ...
+browse-multi --name login export-session > mysite-session.json
+browse-multi --name login stop
+browse-multi --name agent1 start --session mysite-session.json
 ```
 
-On macOS, browser windows are automatically sent to background after launch so they don't steal focus. Bring them forward via Cmd+Tab when needed.
+## Headed / headless mode
+
+Instances are **headed by default** (visible browser window). On macOS, non-login windows are
+automatically sent to background after launch so they don't steal focus. Login instances stay
+in the foreground so the user can interact with them.
+
+Add `--headless` for invisible background browsing:
+
+```bash
+browse-multi --name agent1 --headless goto https://example.com
+```
+
+The legacy `--headed` flag is still accepted but is now a no-op (already the default).
 
 ## Concurrency
 

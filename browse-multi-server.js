@@ -133,7 +133,8 @@ async function startup() {
   browser = await chromium.launch({ headless: !HEADED });
 
   // On macOS, send headed browser windows to background so they don't steal focus
-  if (HEADED && process.platform === 'darwin') {
+  // Skip for login instances — user needs to interact with the window
+  if (HEADED && process.platform === 'darwin' && !NAME.startsWith('login-')) {
     setTimeout(() => {
       try {
         execFileSync('osascript', ['-e', 'tell application "System Events" to set visible of process "Chromium" to false'], { timeout: 3000 });
