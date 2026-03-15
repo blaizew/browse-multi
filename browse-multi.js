@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import {
   readState, allocatePort, generateToken, writeStateAtomic,
   deleteState, healthCheck, waitForReady, sendCommand,
-  listAllStates, stateFilePath
+  listAllStates, stateFilePath, resolvePath
 } from './lib/instance.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,7 @@ if (nameIdx !== -1 && nameIdx + 1 < rawArgs.length) {
 let session = null;
 const sessIdx = rawArgs.indexOf('--session');
 if (sessIdx !== -1 && sessIdx + 1 < rawArgs.length) {
-  session = rawArgs[sessIdx + 1];
+  session = resolvePath(rawArgs[sessIdx + 1]);
   rawArgs.splice(sessIdx, 2);
 }
 

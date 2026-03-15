@@ -12,7 +12,7 @@ import { writeFileSync, unlinkSync } from 'node:fs';
 import {
   readState, allocatePort, generateToken, writeStateAtomic,
   deleteState, healthCheck, waitForReady, sendCommand, listAllStates,
-  sessionsDir, sessionFilePath
+  sessionsDir, sessionFilePath, resolvePath
 } from './lib/instance.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -107,6 +107,9 @@ async function handleToolCall(name, args) {
 async function handleStart({ name, session, headed = true }) {
   if (!name) throw new Error('name is required');
 
+  // Resolve tilde in session path
+  const resolvedSession = resolvePath(session);
+
   // Check if already running
   const existing = readState(name);
   if (existing) {
@@ -117,37 +120,50 @@ async function handleStart({ name, session, headed = true }) {
     deleteState(name);
   }
 
-  // Allocate port
-  const port = allocatePort();
-  if (!port) {
-    throw new Error('No free ports in 9400-9420 range. Run browse_status to see running instances.');
-  }
+  // Retry loop — handles cross-session port collisions (different CC sessions
+  // have separate MCP server processes, so they can race on port allocation)
+  const MAX_ATTEMPTS = 3;
+  const triedPorts = new Set();
 
-  const token = generateToken();
-  writeStateAtomic(name, { port, token, pid: null, startedAt: new Date().toISOString() });
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // Allocate port, skipping previously failed ports
+    const port = allocatePort(triedPorts);
+    if (!port) {
+      throw new Error('No free ports in 9400-9420 range. Run browse_status to see running instances.');
+    }
+    triedPorts.add(port);
 
-  // Spawn server
-  const serverArgs = ['--name', name, '--port', String(port), '--token', token];
-  if (session) serverArgs.push('--session', session);
-  if (headed) serverArgs.push('--headed');
+    const token = generateToken();
+    writeStateAtomic(name, { port, token, pid: null, startedAt: new Date().toISOString() });
 
-  const child = spawn('node', [SERVER_SCRIPT, ...serverArgs], {
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: join(__dirname, 'browsers') },
-  });
-  child.unref();
+    // Spawn server
+    const serverArgs = ['--name', name, '--port', String(port), '--token', token];
+    if (resolvedSession) serverArgs.push('--session', resolvedSession);
+    if (headed) serverArgs.push('--headed');
 
-  writeStateAtomic(name, { port, token, pid: child.pid, startedAt: new Date().toISOString() });
+    const child = spawn('node', [SERVER_SCRIPT, ...serverArgs], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: join(__dirname, 'browsers') },
+    });
+    child.unref();
 
-  // Wait for ready
-  const ready = await waitForReady(port);
-  if (!ready) {
+    writeStateAtomic(name, { port, token, pid: child.pid, startedAt: new Date().toISOString() });
+
+    // Wait for ready
+    const ready = await waitForReady(port);
+    if (ready) {
+      return { text: `Started "${name}" on port ${port} (pid: ${child.pid}). Use browse-multi commands in Bash now.` };
+    }
+
+    // Startup failed — clean up and retry with next port
     deleteState(name);
-    throw new Error('Server failed to start within 10s. Check logs in state directory.');
+    if (attempt < MAX_ATTEMPTS) {
+      continue;
+    }
   }
 
-  return { text: `Started "${name}" on port ${port} (pid: ${child.pid}). Use browse-multi commands in Bash now.` };
+  throw new Error(`Server failed to start after ${MAX_ATTEMPTS} attempts. Check logs in state directory.`);
 }
 
 async function handleStop({ name } = {}) {
@@ -328,10 +344,26 @@ async function handleMessage(msg) {
   }
 }
 
+// Serialize message processing — prevents port allocation races when
+// multiple agents call browse_start concurrently via the same MCP server.
+const messageQueue = [];
+let processing = false;
+
+async function processQueue() {
+  if (processing) return;
+  processing = true;
+  while (messageQueue.length > 0) {
+    const msg = messageQueue.shift();
+    await handleMessage(msg);
+  }
+  processing = false;
+}
+
 rl.on('line', (line) => {
   if (!line.trim()) return;
   try {
-    handleMessage(JSON.parse(line));
+    messageQueue.push(JSON.parse(line));
+    processQueue();
   } catch {
     // Malformed JSON — ignore
   }
