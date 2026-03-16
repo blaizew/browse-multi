@@ -1,7 +1,7 @@
 ---
 name: browse-multi
 description: |
-  Concurrent browser automation via persistent headless Chromium daemons with CLI interface.
+  Concurrent browser automation via persistent headless Chromium daemons with MCP interface.
   Each agent gets its own named instance (~200ms/command after first call).
   DEFAULT tool for all agent browsing. Every agent and sub-agent that needs to browse
   the web MUST use browse-multi, not Playwright MCP. Playwright MCP is reserved for
@@ -18,7 +18,7 @@ allowed-tools:
 
 # browse-multi — Concurrent Browser Automation
 
-Persistent headless Chromium daemons accessed via CLI. Each agent gets its own
+Persistent headless Chromium daemons accessed via MCP server. Each agent gets its own
 named instance. First call auto-starts the browser (~3s). Subsequent commands
 ~200ms. Auto-shuts down after 30 min idle.
 

@@ -8,7 +8,7 @@ Give each AI agent its own named Chromium instance. First call auto-starts the b
 
 AI coding assistants (Claude Code, Cursor, Copilot, Windsurf, etc.) often need to browse the web -- scraping documentation, filling forms, verifying deployments, taking screenshots. But most browser tools give you a single shared instance, which breaks when you have parallel agents or sub-agents that each need their own browser.
 
-browse-multi solves this with **named instances**. Each agent gets its own persistent Chromium process, accessed via simple CLI commands or an MCP server. No shared state, no conflicts, up to 21 concurrent instances.
+browse-multi solves this with **named instances**. Each agent gets its own persistent Chromium process, accessed via an MCP server that works in both sandboxed and unsandboxed environments. No shared state, no conflicts, up to 21 concurrent instances.
 
 ## Install
 
@@ -30,121 +30,82 @@ If `claude mcp add` fails from inside Claude Code, the setup script will print a
 
 ## Quick start
 
-```bash
+All interaction goes through the MCP server. This works in both sandboxed and unsandboxed environments.
+
+```
+# Start an instance
+browse_start(name: "agent1")
+
 # Browse
-browse-multi --name agent1 goto https://example.com
-browse-multi --name agent1 text
-browse-multi --name agent1 screenshot ./page.png
+browse_command(name: "agent1", command: "goto", args: ["https://example.com"])
+browse_command(name: "agent1", command: "text")
+browse_command(name: "agent1", command: "screenshot", args: ["./page.png"])
 
 # Another agent, concurrently
-browse-multi --name agent2 goto https://docs.python.org
-browse-multi --name agent2 snapshot -i
-browse-multi --name agent2 click @e3
+browse_start(name: "agent2")
+browse_command(name: "agent2", command: "goto", args: ["https://docs.python.org"])
+browse_command(name: "agent2", command: "snapshot", args: ["-i"])
+browse_command(name: "agent2", command: "click", args: ["@e3"])
+
+# Stop when done
+browse_stop(name: "agent1")
+browse_stop(name: "agent2")
 ```
 
-## MCP server (required for sandboxed environments)
+## How it works
 
-browse-multi ships with an MCP server that manages instance lifecycle (start/stop/status). **This is not optional** — it's the primary way to use browse-multi with Claude Code and other sandboxed AI coding tools.
-
-### Why MCP?
-
-Claude Code runs Bash commands inside a macOS Seatbelt sandbox that blocks both Chromium from launching (Mach port registration is denied) and localhost TCP connections (sub-agents can't reach HTTP servers on 127.0.0.1). The MCP server runs outside the sandbox as a separate process, so it can start Chromium instances and proxy commands to them.
+The MCP server manages instance lifecycle and proxies commands to per-instance Chromium daemons. This architecture works in sandboxed environments (where Bash can't launch Chromium or connect to localhost) and unsandboxed ones alike.
 
 ```
 ┌─────────────────────────────────────────────┐
-│  Claude Code sandbox                         │
+│  AI coding agent (sandboxed or not)          │
 │                                              │
-│  MCP: browse_command(name, "goto", [url]) ──────▶ (outside sandbox)
-│  MCP: browse_command(name, "text")          ──────▶ (outside sandbox)
+│  MCP: browse_start(name: "a1")          ──────▶ spawns Chromium daemon
+│  MCP: browse_command(name, "goto", [url]) ──────▶ proxied to daemon
+│  MCP: browse_command(name, "text")        ──────▶ proxied to daemon
+│  MCP: browse_stop(name: "a1")            ──────▶ kills daemon
 │                                              │
 └─────────────────────────────────────────────┘
                                                          │
 ┌─────────────────────────────────────────────┐          │
-│  Outside sandbox (MCP server)                │          │
+│  MCP server (outside sandbox)               │          │
 │                                              │          ▼
-│  browse_start(name: "a1") ──▶ spawns ──▶ Chromium daemon on :9400
-│  browse_command(name, cmd) ──▶ HTTP ──▶ 127.0.0.1:9400
-│  browse_stop(name: "a1")                     │
+│  browse-multi-mcp.js ──▶ spawns ──▶ Chromium daemon on :9400
+│                       ──▶ HTTP  ──▶ 127.0.0.1:9400
+│                       ──▶ kill  ──▶ stops daemon
 └─────────────────────────────────────────────┘
 ```
 
-### Setup
-
-Register the MCP server with Claude Code:
-
-```bash
-claude mcp add browse-multi -- node /path/to/browse-multi/browse-multi-mcp.js
-```
-
-Then restart Claude Code. The MCP tools will be available immediately.
-
-### Usage flow
-
-1. **Start an instance** via MCP (outside sandbox):
-   ```
-   browse_start(name: "research")
-   browse_start(name: "agent1", session: "/path/to/cookies.json", headed: true)
-   ```
-
-2. **Send commands** via MCP (proxied outside sandbox):
-   ```
-   browse_command(name: "research", command: "goto", args: ["https://example.com"])
-   browse_command(name: "research", command: "text")
-   browse_command(name: "research", command: "screenshot", args: ["./page.png"])
-   ```
-
-3. **Stop when done** via MCP:
-   ```
-   browse_stop(name: "research")
-   browse_stop()  # stop all
-   ```
-
-**CLI fallback** (only works outside sandbox — standalone use, CI, etc.):
-```bash
-browse-multi --name research goto https://example.com
-browse-multi --name research text
-```
+Each daemon is fully independent -- its own Chromium process, its own port, its own auth token. Daemons auto-shutdown after 30 minutes of inactivity.
 
 ### MCP tools
 
 | Tool | Description |
 |------|-------------|
 | `browse_start` | Start a named Chromium instance (params: `name`, `session?`, `headed?`) |
-| `browse_command` | Send any command to a running instance (params: `name`, `command`, `args?`). Primary way to interact — works inside sandbox. |
+| `browse_command` | Send any command to a running instance (params: `name`, `command`, `args?`) |
 | `browse_stop` | Stop an instance or all instances (params: `name?`) |
 | `browse_status` | List all running instances with port, PID, and health |
 | `browse_login` | Open a headed browser for user to log in (params: `url`) |
 | `browse_login_complete` | Save session cookies and close login browser (params: `name?`, `domain?`) |
 
-## Architecture
+### MCP setup
 
-```
-                    ┌─────────────────────────┐
-  CLI command ──────▶  browse-multi.js (client) │
-                    └──────────┬──────────────┘
-                               │ HTTP POST /command
-                               ▼
-                    ┌─────────────────────────┐
-                    │ browse-multi-server.js   │  ← one per instance
-                    │  (detached daemon)       │     port 9400-9420
-                    │  ┌─────────────────┐     │
-                    │  │ Chromium (PW)   │     │
-                    │  └─────────────────┘     │
-                    └─────────────────────────┘
+The install script handles this automatically. To register manually:
+
+```bash
+claude mcp add browse-multi -- node /path/to/browse-multi/browse-multi-mcp.js
 ```
 
-**How it works:**
-
-1. You run `browse-multi --name foo goto https://example.com`
-2. The CLI checks if instance `foo` is already running (via state file in `~/.browse-multi/`)
-3. If not, it allocates a port (9400-9420), spawns a detached server daemon, and waits for it to be ready
-4. The CLI sends the command as an HTTP POST to the daemon
-5. The daemon executes it against a real Chromium browser via Playwright
-6. Result comes back as JSON, CLI prints it
-
-Each daemon is fully independent -- its own Chromium process, its own port, its own auth token. Daemons auto-shutdown after 30 minutes of inactivity.
+Then restart Claude Code.
 
 ## Commands
+
+All commands are sent via `browse_command`. The `command` parameter is the command name, and `args` is an array of arguments.
+
+```
+browse_command(name: "a1", command: "<command>", args: ["<arg1>", "<arg2>"])
+```
 
 ### Navigation
 
@@ -155,10 +116,10 @@ Each daemon is fully independent -- its own Chromium process, its own port, its 
 | `reload` | Reload current page |
 | `url` | Print current URL |
 
-```bash
-browse-multi --name a1 goto https://example.com
-browse-multi --name a1 back
-browse-multi --name a1 url
+```
+browse_command(name: "a1", command: "goto", args: ["https://example.com"])
+browse_command(name: "a1", command: "back")
+browse_command(name: "a1", command: "url")
 ```
 
 ### Content
@@ -170,15 +131,14 @@ browse-multi --name a1 url
 | `snapshot [-i] [-s selector]` | Build DOM tree with @ref handles |
 | `scroll [up\|down\|selector]` | Scroll viewport or element into view |
 
-```bash
-browse-multi --name a1 text
-browse-multi --name a1 text --limit 5000
-browse-multi --name a1 html ".main-content"
-browse-multi --name a1 snapshot -i              # interactive elements only
-browse-multi --name a1 snapshot -s "#sidebar"   # scoped to element
-browse-multi --name a1 scroll                   # down one viewport
-browse-multi --name a1 scroll up
-browse-multi --name a1 scroll ".footer"         # scroll element into view
+```
+browse_command(name: "a1", command: "text")
+browse_command(name: "a1", command: "text", args: ["--limit", "5000"])
+browse_command(name: "a1", command: "html", args: [".main-content"])
+browse_command(name: "a1", command: "snapshot", args: ["-i"])
+browse_command(name: "a1", command: "scroll")
+browse_command(name: "a1", command: "scroll", args: ["up"])
+browse_command(name: "a1", command: "scroll", args: [".footer"])
 ```
 
 ### Interaction
@@ -197,12 +157,12 @@ browse-multi --name a1 scroll ".footer"         # scroll element into view
 | `upload <sel> <filepath>` | Upload file to input |
 | `resize <WxH>` | Set viewport size |
 
-```bash
-browse-multi --name a1 click @e3
-browse-multi --name a1 fill "#email" "test@test.com"
-browse-multi --name a1 press Enter
-browse-multi --name a1 wait ".results" --timeout 30000
-browse-multi --name a1 resize 375x812
+```
+browse_command(name: "a1", command: "click", args: ["@e3"])
+browse_command(name: "a1", command: "fill", args: ["#email", "test@test.com"])
+browse_command(name: "a1", command: "press", args: ["Enter"])
+browse_command(name: "a1", command: "wait", args: [".results", "--timeout", "30000"])
+browse_command(name: "a1", command: "resize", args: ["375x812"])
 ```
 
 ### Inspection
@@ -214,23 +174,22 @@ browse-multi --name a1 resize 375x812
 | `console` | Show captured console messages (ring buffer, last 500) |
 | `network` | Show captured network requests (ring buffer, last 500) |
 
-```bash
-browse-multi --name a1 js "document.title"
-browse-multi --name a1 js "document.querySelector('.price').textContent"
-echo 'document.querySelectorAll("a").length' | browse-multi --name a1 eval
-browse-multi --name a1 console
-browse-multi --name a1 network
+```
+browse_command(name: "a1", command: "js", args: ["document.title"])
+browse_command(name: "a1", command: "js", args: ["document.querySelector('.price').textContent"])
+browse_command(name: "a1", command: "console")
+browse_command(name: "a1", command: "network")
 ```
 
 ### Visual
 
 | Command | Description |
 |---------|-------------|
-| `screenshot [path]` | Take screenshot (default: `~/.browse-multi/browse-multi-screenshot-{name}.png`) |
+| `screenshot [path]` | Take screenshot (default: state directory) |
 
-```bash
-browse-multi --name a1 screenshot
-browse-multi --name a1 screenshot ./my-screenshot.png
+```
+browse_command(name: "a1", command: "screenshot")
+browse_command(name: "a1", command: "screenshot", args: ["./my-screenshot.png"])
 ```
 
 ### Tabs
@@ -242,11 +201,11 @@ browse-multi --name a1 screenshot ./my-screenshot.png
 | `newtab [url]` | Open new tab |
 | `closetab [id]` | Close tab (defaults to current) |
 
-```bash
-browse-multi --name a1 newtab https://other.com
-browse-multi --name a1 tabs
-browse-multi --name a1 tab 0
-browse-multi --name a1 closetab 1
+```
+browse_command(name: "a1", command: "newtab", args: ["https://other.com"])
+browse_command(name: "a1", command: "tabs")
+browse_command(name: "a1", command: "tab", args: ["0"])
+browse_command(name: "a1", command: "closetab", args: ["1"])
 ```
 
 ### Session
@@ -254,52 +213,35 @@ browse-multi --name a1 closetab 1
 | Command | Description |
 |---------|-------------|
 | `export-session` | Export cookies and storage state as JSON |
-| `save-session [domain]` | Export and save to `~/.claude/sessions/<domain>.json` |
-| `login <url>` | Open headed browser for manual login |
-| `start [--session file]` | Start instance without running a command |
-| `stop` | Stop an instance |
-| `stop --all` | Stop all instances |
+| `save-session [domain]` | Export and save to sessions directory |
 
-```bash
-browse-multi login https://mysite.com/login        # headed browser for login
-browse-multi --name login-mysite.com save-session   # save to ~/.claude/sessions/mysite.com.json
-browse-multi --name login-mysite.com stop
-browse-multi --name a1 start --session ~/.claude/sessions/mysite.com.json
-browse-multi --name a1 export-session > session.json  # raw JSON to stdout
-browse-multi --name a1 stop
-browse-multi stop --all
+```
+browse_command(name: "a1", command: "save-session")
+browse_command(name: "a1", command: "save-session", args: ["example.com"])
+browse_command(name: "a1", command: "export-session")
 ```
 
-### Meta
+### Multi-command chain
 
-| Command | Description |
-|---------|-------------|
-| `status` | List all running instances with port, PID, health |
-| `chain [--timeout ms]` | Execute multiple commands in sequence (JSON via stdin) |
-| `help` | Show help |
-
-```bash
-browse-multi status
-echo '[["goto","https://example.com"],["text"],["screenshot","./out.png"]]' | browse-multi --name a1 chain
+```
+browse_command(name: "a1", command: "chain", args: [
+  "[\"goto\",\"https://example.com\"],[\"text\"],[\"screenshot\",\"./out.png\"]"
+])
 ```
 
 ## The @ref system
 
 The `snapshot` command annotates DOM elements with `@ref` handles (`@e1`, `@e2`, ...) that you can use in place of CSS selectors for `click`, `fill`, and `hover`:
 
-```bash
-# Get interactive elements
-$ browse-multi --name a1 snapshot -i
-@e1  a "Home"
-@e2  a "About"
-@e3  input placeholder="Search..."
-@e4  button "Submit"
+```
+browse_command(name: "a1", command: "snapshot", args: ["-i"])
+# → @e1  a "Home"
+#   @e2  a "About"
+#   @e3  input placeholder="Search..."
+#   @e4  button "Submit"
 
-# Click by ref
-$ browse-multi --name a1 click @e4
-
-# Fill by ref
-$ browse-multi --name a1 fill @e3 "search query"
+browse_command(name: "a1", command: "click", args: ["@e4"])
+browse_command(name: "a1", command: "fill", args: ["@e3", "search query"])
 ```
 
 **Lifecycle:** Refs are assigned during `snapshot` and remain valid until any navigation (`goto`, `back`, `reload`), which clears them. Always re-snapshot after navigating.
@@ -310,49 +252,29 @@ $ browse-multi --name a1 fill @e3 "search query"
 
 ## Authenticated browsing
 
-Sessions are stored in `~/.claude/sessions/<domain>.json` and can be shared across instances.
+Sessions are stored in the sessions directory (`~/.claude/sessions/<domain>.json` by default) and can be shared across instances.
 
-### Login flow (MCP)
+### Login flow
 
 ```
-browse_login(url: "https://mysite.com/login")     # opens headed browser
-# ... user logs in ...
-browse_login_complete()                             # saves to ~/.claude/sessions/mysite.com.json
-```
+# Step 1: Open a headed browser for the user to log in
+browse_login(url: "https://mysite.com/login")
 
-### Login flow (CLI)
+# Step 2: User logs in manually...
 
-```bash
-browse-multi login https://mysite.com/login                  # opens headed browser
-# ... log in manually ...
-browse-multi --name login-mysite.com save-session             # saves session
-browse-multi --name login-mysite.com stop
+# Step 3: Save session cookies and close the browser
+browse_login_complete()
+# → saves to ~/.claude/sessions/mysite.com.json
 ```
 
 ### Using saved sessions
 
-```bash
-# Via MCP
+```
 browse_start(name: "agent1", session: "~/.claude/sessions/mysite.com.json")
-
-# Via CLI
-browse-multi --name agent1 start --session ~/.claude/sessions/mysite.com.json
-browse-multi --name agent1 goto https://mysite.com/dashboard
+browse_command(name: "agent1", command: "goto", args: ["https://mysite.com/dashboard"])
 ```
 
-The `--session` flag only applies when starting a new instance. To refresh expired sessions, stop the instance, re-login, and start again with the updated session file.
-
-### Legacy: manual export
-
-You can also export raw session JSON to stdout:
-
-```bash
-browse-multi --name login goto https://mysite.com
-# ... log in manually ...
-browse-multi --name login export-session > mysite-session.json
-browse-multi --name login stop
-browse-multi --name agent1 start --session mysite-session.json
-```
+The `session` parameter only applies when the instance starts. To refresh expired sessions, stop the instance, re-login, and start again with the updated session file.
 
 ## Headed / headless mode
 
@@ -360,30 +282,56 @@ Instances are **headed by default** (visible browser window). On macOS, non-logi
 automatically sent to background after launch so they don't steal focus. Login instances stay
 in the foreground so the user can interact with them.
 
-Add `--headless` for invisible background browsing:
+For headless (invisible) browsing:
 
-```bash
-browse-multi --name agent1 --headless goto https://example.com
 ```
-
-The legacy `--headed` flag is still accepted but is now a no-op (already the default).
+browse_start(name: "agent1", headed: false)
+```
 
 ## Concurrency
 
 Each `--name` gets its own Chromium process with its own port (range 9400-9420, up to 21 concurrent instances). Instances are fully isolated -- different pages, different cookies, different state.
 
-```bash
+```
 # Three agents browsing simultaneously
-browse-multi --name agent1 goto https://site-a.com &
-browse-multi --name agent2 goto https://site-b.com &
-browse-multi --name agent3 goto https://site-c.com &
-wait
+browse_start(name: "agent1")
+browse_start(name: "agent2")
+browse_start(name: "agent3")
+
+browse_command(name: "agent1", command: "goto", args: ["https://site-a.com"])
+browse_command(name: "agent2", command: "goto", args: ["https://site-b.com"])
+browse_command(name: "agent3", command: "goto", args: ["https://site-c.com"])
 ```
 
 **Rules:**
 - Never share a `--name` between concurrent agents
 - Each instance uses ~100-200MB RAM
-- If you run out of ports, use `browse-multi status` to find idle instances and stop them
+- If you run out of ports, use `browse_status` to find idle instances and stop them
+
+## CLI fallback
+
+A CLI is available for standalone use, CI, or environments where MCP is not available. The CLI sends the same HTTP commands to the same daemons — it's an alternative interface, not a different system.
+
+```bash
+browse-multi --name a1 goto https://example.com
+browse-multi --name a1 text
+browse-multi --name a1 screenshot ./page.png
+browse-multi --name a1 click @e3
+browse-multi --name a1 stop
+browse-multi status
+browse-multi stop --all
+```
+
+Session management via CLI:
+
+```bash
+browse-multi login https://mysite.com/login                  # headed browser for login
+browse-multi --name login-mysite.com save-session             # save session
+browse-multi --name login-mysite.com stop
+browse-multi --name a1 start --session ~/.claude/sessions/mysite.com.json
+```
+
+**Note:** The CLI requires localhost TCP access. In sandboxed environments (Claude Code with Seatbelt), the CLI won't work — use the MCP tools instead.
 
 ## HTTP API
 
@@ -409,7 +357,7 @@ Content-Type: application/json
 → { "ok": true, "result": "Navigated to https://example.com/" }
 ```
 
-Port and token are stored in the state file at `~/.browse-multi/browse-multi-{name}.json`.
+Port and token are stored in the state file at `~/.browse-multi/browse-multi-{name}.json` (or `$BROWSE_MULTI_STATE_DIR`).
 
 ## Configuration
 
@@ -418,21 +366,36 @@ Port and token are stored in the state file at `~/.browse-multi/browse-multi-{na
 | `BROWSE_MULTI_STATE_DIR` | `~/.browse-multi` | Directory for state files, logs, and default screenshots |
 | `BROWSE_MULTI_SESSIONS_DIR` | `~/.claude/sessions` | Directory for saved session/cookie files |
 
+To set env vars for the MCP server, use a wrapper script:
+
+```bash
+#!/bin/bash
+export BROWSE_MULTI_STATE_DIR="$HOME/my-custom-state-dir"
+export BROWSE_MULTI_SESSIONS_DIR="$HOME/my-custom-sessions-dir"
+exec node /path/to/browse-multi/browse-multi-mcp.js "$@"
+```
+
+Then register the wrapper as the MCP command:
+
+```bash
+claude mcp add browse-multi -- /path/to/wrapper.sh
+```
+
 ## Troubleshooting
 
-**"No free ports"** -- Too many instances running. Run `browse-multi status` and stop idle ones.
+**"No free ports"** -- Too many instances running. Run `browse_status` and stop idle ones.
 
 **"Server failed to start"** -- Check logs at `~/.browse-multi/browse-multi-{name}.log` (or `$BROWSE_MULTI_STATE_DIR`).
 
 **"@eN not found"** -- Refs are stale. Run `snapshot` again after any navigation.
 
-**Stale instances** -- `browse-multi status` auto-cleans dead instances.
+**Stale instances** -- `browse_status` auto-cleans dead instances.
 
-**Instance won't stop** -- Kill the process manually. Check PID in `~/.browse-multi/browse-multi-{name}.json`.
+**Instance won't stop** -- Kill the process manually. Check PID in the state file.
 
-**Auth not working** -- Session cookies may have expired. Re-export and restart the instance with a fresh session file.
+**Auth not working** -- Session cookies may have expired. Re-login via `browse_login` and restart the instance with a fresh session file.
 
-**Sandbox blocking Chromium or localhost** -- The macOS Seatbelt sandbox blocks both Chromium launch and localhost TCP connections. Use `browse_command` MCP tool for all commands — it runs outside the sandbox. The CLI fallback only works in non-sandboxed contexts.
+**Sandbox blocking Chromium or localhost** -- Use the MCP tools (`browse_command`) for all commands. They run outside the sandbox. The CLI only works in non-sandboxed contexts.
 
 ## Requirements
 
