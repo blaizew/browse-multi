@@ -48,14 +48,14 @@ browse-multi ships with an MCP server that manages instance lifecycle (start/sto
 
 ### Why MCP?
 
-Claude Code runs Bash commands inside a macOS Seatbelt sandbox that blocks Chromium from launching (specifically, Mach port registration is denied). The MCP server runs outside the sandbox as a separate process, so it can start Chromium instances. Once an instance is running, all browse commands go through Bash as HTTP requests to `127.0.0.1` — which works fine from inside the sandbox.
+Claude Code runs Bash commands inside a macOS Seatbelt sandbox that blocks both Chromium from launching (Mach port registration is denied) and localhost TCP connections (sub-agents can't reach HTTP servers on 127.0.0.1). The MCP server runs outside the sandbox as a separate process, so it can start Chromium instances and proxy commands to them.
 
 ```
 ┌─────────────────────────────────────────────┐
 │  Claude Code sandbox                         │
 │                                              │
-│  Bash: browse-multi --name a1 goto URL  ────────▶ HTTP to 127.0.0.1:9400
-│  Bash: browse-multi --name a1 text      ────────▶ HTTP to 127.0.0.1:9400
+│  MCP: browse_command(name, "goto", [url]) ──────▶ (outside sandbox)
+│  MCP: browse_command(name, "text")          ──────▶ (outside sandbox)
 │                                              │
 └─────────────────────────────────────────────┘
                                                          │
@@ -63,8 +63,8 @@ Claude Code runs Bash commands inside a macOS Seatbelt sandbox that blocks Chrom
 │  Outside sandbox (MCP server)                │          │
 │                                              │          ▼
 │  browse_start(name: "a1") ──▶ spawns ──▶ Chromium daemon on :9400
+│  browse_command(name, cmd) ──▶ HTTP ──▶ 127.0.0.1:9400
 │  browse_stop(name: "a1")                     │
-│  browse_status()                             │
 └─────────────────────────────────────────────┘
 ```
 
@@ -86,11 +86,11 @@ Then restart Claude Code. The MCP tools will be available immediately.
    browse_start(name: "agent1", session: "/path/to/cookies.json", headed: true)
    ```
 
-2. **Send commands** via Bash (inside sandbox):
-   ```bash
-   browse-multi --name research goto https://example.com
-   browse-multi --name research text
-   browse-multi --name research screenshot ./page.png
+2. **Send commands** via MCP (proxied outside sandbox):
+   ```
+   browse_command(name: "research", command: "goto", args: ["https://example.com"])
+   browse_command(name: "research", command: "text")
+   browse_command(name: "research", command: "screenshot", args: ["./page.png"])
    ```
 
 3. **Stop when done** via MCP:
@@ -99,11 +99,18 @@ Then restart Claude Code. The MCP tools will be available immediately.
    browse_stop()  # stop all
    ```
 
+**CLI fallback** (only works outside sandbox — standalone use, CI, etc.):
+```bash
+browse-multi --name research goto https://example.com
+browse-multi --name research text
+```
+
 ### MCP tools
 
 | Tool | Description |
 |------|-------------|
 | `browse_start` | Start a named Chromium instance (params: `name`, `session?`, `headed?`) |
+| `browse_command` | Send any command to a running instance (params: `name`, `command`, `args?`). Primary way to interact — works inside sandbox. |
 | `browse_stop` | Stop an instance or all instances (params: `name?`) |
 | `browse_status` | List all running instances with port, PID, and health |
 | `browse_login` | Open a headed browser for user to log in (params: `url`) |
@@ -424,7 +431,7 @@ Port and token are stored in the state file at `~/.browse-multi/browse-multi-{na
 
 **Auth not working** -- Session cookies may have expired. Re-export and restart the instance with a fresh session file.
 
-**Sandbox blocking Chromium** -- Use the MCP server to start instances from outside the sandbox. HTTP commands to running instances work fine from within sandboxed environments.
+**Sandbox blocking Chromium or localhost** -- The macOS Seatbelt sandbox blocks both Chromium launch and localhost TCP connections. Use `browse_command` MCP tool for all commands — it runs outside the sandbox. The CLI fallback only works in non-sandboxed contexts.
 
 ## Requirements
 
