@@ -306,7 +306,25 @@ mcp__browse-multi__browse_command(name: "myagent", command: "screenshot")
 
 **NEVER use Bash for browse-multi commands.** This is the #1 cause of failures.
 
-### 2. Parent starts instances, agents send commands
+### 2. ALWAYS check for existing sessions before starting
+
+Before calling `browse_start` for ANY site, check if a session file exists:
+```bash
+ls ~/.claude/sessions/
+```
+If a session file matches the target domain (e.g., `facebook.com.json` for facebook.com),
+pass it via the `session` parameter. This ensures you browse as the authenticated user
+whenever credentials are available — even if the task doesn't explicitly mention login.
+
+```
+# Session exists → use it
+mcp__browse-multi__browse_start(name: "myagent", session: "~/.claude/sessions/facebook.com.json")
+
+# No session → start without
+mcp__browse-multi__browse_start(name: "myagent")
+```
+
+### 3. Parent starts instances, agents send commands
 
 The parent starts instances via `browse_start` and passes the instance name to the
 agent. The agent uses `browse_command` for all browsing:
@@ -325,7 +343,7 @@ mcp__browse-multi__browse_command(name: "agent-1", command: "goto", args: ["http
 mcp__browse-multi__browse_command(name: "agent-1", command: "text", args: ["--limit", "5000"])
 ```
 
-### 3. On errors, report and stop
+### 4. On errors, report and stop
 
 If a `browse_command` call fails, report the exact error and stop. Do NOT:
 - Investigate state files, logs, or process tables
@@ -336,7 +354,7 @@ If a `browse_command` call fails, report the exact error and stop. Do NOT:
 
 The parent can diagnose and retry.
 
-### 4. Never use Bash for file operations
+### 5. Never use Bash for file operations
 
 Use `Read` tool for reading files. Use `Glob` tool for listing/finding files.
 Never use `cat`, `tail`, `head`, `ls`, or `find` via Bash.
