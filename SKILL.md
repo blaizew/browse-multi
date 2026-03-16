@@ -275,6 +275,71 @@ simultaneously with different names. Port range: 9400-9420 (up to 21 instances).
 
 **Never share a `--name` between agents.** Each agent must use its own unique name.
 
+## Agent Rules
+
+When sub-agents use browse-multi, they MUST follow these rules. Violations cause
+permission prompts, sandbox escapes, and wasted compute.
+
+### 1. Parent starts instances, agents consume them
+
+The parent/coordinator starts instances via MCP (`mcp__browse-multi__browse_start`)
+and passes the instance name to the agent. Sub-agents NEVER start their own
+instances — they don't have MCP access, and starting via Bash hits the sandbox.
+
+**Parent does:**
+```
+mcp__browse-multi__browse_start(name: "agent-1", session: "~/.claude/sessions/example.com.json")
+```
+
+**Agent prompt includes:** "Your browse-multi instance is `agent-1`. It is already running."
+
+**Agent does:** Only CLI commands (`$BM goto ...`, `$BM text`, etc.)
+
+### 2. Run only the commands you're given
+
+If a browse-multi command fails, report the exact error output and stop. Do NOT:
+- Investigate state files, logs, or process tables
+- Kill processes or clean up ports
+- Restart instances
+- Try alternative approaches or workarounds
+
+The parent can diagnose and retry. Agents that improvise trigger permission prompts
+and make incorrect diagnoses (e.g., blaming the sandbox for a dead instance).
+
+### 3. Never use Bash for file operations
+
+Use `Read` tool for reading files. Use `Glob` tool for listing/finding files.
+Never use `cat`, `tail`, `head`, `ls`, or `find` via Bash. These trigger permission
+prompts that block autonomous operation.
+
+### 4. One command per Bash call
+
+Never chain browse-multi commands with `;`, `&&`, or `|`. Each command must be
+its own Bash call:
+
+**Do this:**
+```bash
+$BM goto https://example.com
+```
+```bash
+$BM text
+```
+
+**Never this:**
+```bash
+$BM goto https://example.com; echo "---"; $BM text
+```
+
+Chaining breaks permission pattern matching. `Bash(browse-multi:*)`
+only matches when the command is the entire bash string.
+
+### 5. Never disable the sandbox
+
+If a command fails with a connection error, the instance is probably dead — not
+blocked by the sandbox. Report the error. Do NOT use `dangerouslyDisableSandbox`.
+The sandbox allows localhost HTTP connections; connection failures mean the server
+process is not running.
+
 ## Playwright MCP Coexistence
 
 This CLI runs alongside Playwright MCP, not replacing it:
