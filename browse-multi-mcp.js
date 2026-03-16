@@ -131,6 +131,15 @@ async function handleStart({ name, session, headed = true }) {
     if (!port) {
       throw new Error('No free ports in 9400-9420 range. Run browse_status to see running instances.');
     }
+
+    // Pre-check: is something already listening on this port? (orphaned process)
+    const preCheck = await healthCheck(port, 1000);
+    if (preCheck && preCheck.ok) {
+      triedPorts.add(port);
+      if (attempt < MAX_ATTEMPTS) continue;
+      throw new Error(`Port ${port} occupied by orphaned instance "${preCheck.name}". Kill pid manually or restart.`);
+    }
+
     triedPorts.add(port);
 
     const token = generateToken();
@@ -153,7 +162,15 @@ async function handleStart({ name, session, headed = true }) {
     // Wait for ready
     const ready = await waitForReady(port);
     if (ready) {
-      return { text: `Started "${name}" on port ${port} (pid: ${child.pid}). Use browse-multi commands in Bash now.` };
+      // Verify the server that responded is actually ours (not an orphaned process)
+      const verify = await healthCheck(port, 2000);
+      if (verify && verify.name === name) {
+        return { text: `Started "${name}" on port ${port} (pid: ${child.pid}). Use browse-multi commands in Bash now.` };
+      }
+      // Wrong instance on this port — our server likely failed to bind
+      deleteState(name);
+      if (attempt < MAX_ATTEMPTS) continue;
+      throw new Error(`Port ${port} occupied by orphaned instance "${verify?.name}". Kill pid manually or restart.`);
     }
 
     // Startup failed — clean up and retry with next port

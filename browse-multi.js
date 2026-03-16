@@ -149,7 +149,7 @@ if (command === 'chain') {
     stdinData += chunk;
   }
   // Parse and execute chain
-  const state = await ensureServer(name, session, headed);
+  const state = await connectToServer(name);
   let steps;
   try { steps = JSON.parse(stdinData); } catch { console.error('Invalid JSON on stdin'); process.exit(1); }
   let timeoutMs = 300000; // 5 min default
@@ -175,8 +175,8 @@ if (command === 'chain') {
   process.exit(0);
 }
 
-// Ensure server is running
-const state = await ensureServer(name, session, headed);
+// Connect to existing server — never auto-start
+const state = await connectToServer(name);
 
 // Send command
 try {
@@ -191,27 +191,26 @@ try {
     process.exit(1);
   }
 } catch (err) {
-  // Server might have died — try once to recover
-  deleteState(name);
-  try {
-    const newState = await ensureServer(name, session, headed);
-    const retryResult = await sendCommand(newState.port, newState.token, command, commandArgs);
-    if (retryResult.ok) {
-      if (retryResult.result !== undefined && retryResult.result !== null) {
-        console.log(typeof retryResult.result === 'string' ? retryResult.result : JSON.stringify(retryResult.result, null, 2));
-      }
-      process.exit(0);
-    } else {
-      console.error(retryResult.error || 'Command failed after retry');
-      process.exit(1);
-    }
-  } catch (retryErr) {
-    console.error(`Server unreachable after retry: ${retryErr.message}`);
-    process.exit(1);
-  }
+  console.error(`Command failed: ${err.message}\nIs instance "${name}" still running? Check: browse-multi status`);
+  process.exit(1);
 }
 
 // --- Functions ---
+
+async function connectToServer(instanceName) {
+  const state = readState(instanceName);
+  if (!state) {
+    console.error(`Instance "${instanceName}" not found. Start it first:\n  mcp__browse-multi__browse_start(name: "${instanceName}")\n  — or —\n  browse-multi --name ${instanceName} start`);
+    process.exit(1);
+  }
+  const health = await healthCheck(state.port);
+  if (!health || !health.ok) {
+    deleteState(instanceName);
+    console.error(`Instance "${instanceName}" is not healthy (stale state cleaned up). Start it again:\n  mcp__browse-multi__browse_start(name: "${instanceName}")\n  — or —\n  browse-multi --name ${instanceName} start`);
+    process.exit(1);
+  }
+  return state;
+}
 
 async function ensureServer(instanceName, sessionFile, useHeaded) {
   // Check existing state
