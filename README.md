@@ -416,6 +416,7 @@ Port and token are stored in the state file at `~/.browse-multi/browse-multi-{na
 | Environment variable | Default | Description |
 |---------------------|---------|-------------|
 | `BROWSE_MULTI_STATE_DIR` | `~/.browse-multi` | Directory for state files, logs, and default screenshots |
+| `BROWSE_MULTI_SESSIONS_DIR` | `~/.claude/sessions` | Directory for saved session/cookie files |
 
 ## Troubleshooting
 
