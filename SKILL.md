@@ -55,30 +55,43 @@ cookies. Agents must never call Playwright MCP tools directly.
 The MCP server is registered automatically by the plugin. Chromium is installed
 via `npm install` (postinstall script). No manual configuration needed.
 
-**Why MCP is required:** Claude Code runs Bash commands inside a macOS Seatbelt
-sandbox that blocks Chromium from launching (Mach port registration is denied).
-The MCP server runs outside the sandbox and handles instance lifecycle (start/stop).
-Once running, all browse commands go through Bash as HTTP requests to 127.0.0.1 —
-which works fine from inside the sandbox.
+**Sandbox constraint:** CC's Bash sandbox blocks BOTH Chromium launch (Mach port
+registration) AND localhost TCP connections (sub-agents can't reach the HTTP server).
+ALL browse-multi operations must go through MCP tools, which run outside the sandbox:
 
-**Sandbox constraint:** When the Bash sandbox is enabled, Chromium can't launch
-(Mach port registration is blocked by Seatbelt). Use the browse-multi MCP tools
-to start/stop instances — MCP servers run outside the sandbox:
 ```
+# Lifecycle
 mcp__browse-multi__browse_start(name: "myagent")
 mcp__browse-multi__browse_start(name: "myagent", session: "~/.claude/sessions/x.com.json")
 mcp__browse-multi__browse_stop(name: "myagent")
 mcp__browse-multi__browse_stop()  # stop all
 mcp__browse-multi__browse_status()
+
+# Browsing — use browse_command for ALL commands (goto, text, click, etc.)
+mcp__browse-multi__browse_command(name: "myagent", command: "goto", args: ["https://example.com"])
+mcp__browse-multi__browse_command(name: "myagent", command: "text", args: ["--limit", "5000"])
+mcp__browse-multi__browse_command(name: "myagent", command: "screenshot")
+mcp__browse-multi__browse_command(name: "myagent", command: "click", args: ["#submit"])
+
+# Login flow
 mcp__browse-multi__browse_login(url: "https://example.com/login")
 mcp__browse-multi__browse_login_complete()  # save session + stop login instance
 ```
-Once the server is running, all browse commands go through Bash as HTTP requests
-(which work fine in the sandbox).
+
+**CLI fallback:** The CLI (`browse-multi.js`) still works for contexts where localhost
+TCP is allowed (standalone use outside sandbox, CI, etc.). But for Claude Code
+agents, always use `browse_command`.
 
 ## Usage
 
-All commands use this pattern:
+**Primary (MCP — works everywhere, including sandbox):**
+```
+mcp__browse-multi__browse_command(name: "myagent", command: "goto", args: ["https://example.com"])
+mcp__browse-multi__browse_command(name: "myagent", command: "text")
+mcp__browse-multi__browse_command(name: "myagent", command: "screenshot")
+```
+
+**CLI fallback (only outside sandbox):**
 ```bash
 browse-multi --name <instance> <command> [args...]
 
@@ -277,68 +290,56 @@ simultaneously with different names. Port range: 9400-9420 (up to 21 instances).
 
 ## Agent Rules
 
-When sub-agents use browse-multi, they MUST follow these rules. Violations cause
-permission prompts, sandbox escapes, and wasted compute.
+When sub-agents use browse-multi, they MUST follow these rules.
 
-### 1. Parent starts instances, agents consume them
+### 1. ALL commands go through MCP — never Bash CLI
 
-The parent/coordinator starts instances via MCP (`mcp__browse-multi__browse_start`)
-and passes the instance name to the agent. Sub-agents NEVER start their own
-instances — they don't have MCP access, and starting via Bash hits the sandbox.
+The macOS Seatbelt sandbox blocks localhost TCP connections. CLI commands (`$BM goto`,
+`$BM text`) use HTTP to localhost and WILL FAIL in sandboxed sub-agents. Use
+`browse_command` MCP tool for everything:
+
+```
+mcp__browse-multi__browse_command(name: "myagent", command: "goto", args: ["https://example.com"])
+mcp__browse-multi__browse_command(name: "myagent", command: "text")
+mcp__browse-multi__browse_command(name: "myagent", command: "screenshot")
+```
+
+**NEVER use Bash for browse-multi commands.** This is the #1 cause of failures.
+
+### 2. Parent starts instances, agents send commands
+
+The parent starts instances via `browse_start` and passes the instance name to the
+agent. The agent uses `browse_command` for all browsing:
 
 **Parent does:**
 ```
 mcp__browse-multi__browse_start(name: "agent-1", session: "~/.claude/sessions/example.com.json")
 ```
 
-**Agent prompt includes:** "Your browse-multi instance is `agent-1`. It is already running."
+**Agent prompt includes:** "Your browse-multi instance is `agent-1`. It is already running.
+Use `mcp__browse-multi__browse_command(name: 'agent-1', command: '...', args: [...])` for all browsing."
 
-**Agent does:** Only CLI commands (`$BM goto ...`, `$BM text`, etc.)
+**Agent does:**
+```
+mcp__browse-multi__browse_command(name: "agent-1", command: "goto", args: ["https://example.com"])
+mcp__browse-multi__browse_command(name: "agent-1", command: "text", args: ["--limit", "5000"])
+```
 
-### 2. Run only the commands you're given
+### 3. On errors, report and stop
 
-If a browse-multi command fails, report the exact error output and stop. Do NOT:
+If a `browse_command` call fails, report the exact error and stop. Do NOT:
 - Investigate state files, logs, or process tables
 - Kill processes or clean up ports
 - Restart instances
 - Try alternative approaches or workarounds
+- Use `dangerouslyDisableSandbox`
 
-The parent can diagnose and retry. Agents that improvise trigger permission prompts
-and make incorrect diagnoses (e.g., blaming the sandbox for a dead instance).
+The parent can diagnose and retry.
 
-### 3. Never use Bash for file operations
+### 4. Never use Bash for file operations
 
 Use `Read` tool for reading files. Use `Glob` tool for listing/finding files.
-Never use `cat`, `tail`, `head`, `ls`, or `find` via Bash. These trigger permission
-prompts that block autonomous operation.
-
-### 4. One command per Bash call
-
-Never chain browse-multi commands with `;`, `&&`, or `|`. Each command must be
-its own Bash call:
-
-**Do this:**
-```bash
-$BM goto https://example.com
-```
-```bash
-$BM text
-```
-
-**Never this:**
-```bash
-$BM goto https://example.com; echo "---"; $BM text
-```
-
-Chaining breaks permission pattern matching. `Bash(browse-multi:*)`
-only matches when the command is the entire bash string.
-
-### 5. Never disable the sandbox
-
-If a command fails with a connection error, the instance is probably dead — not
-blocked by the sandbox. Report the error. Do NOT use `dangerouslyDisableSandbox`.
-The sandbox allows localhost HTTP connections; connection failures mean the server
-process is not running.
+Never use `cat`, `tail`, `head`, `ls`, or `find` via Bash.
 
 ## Playwright MCP Coexistence
 

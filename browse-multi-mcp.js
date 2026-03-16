@@ -64,6 +64,19 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'browse_command',
+    description: 'Send a command to a running browse-multi instance. Use this instead of CLI Bash commands — it runs outside the sandbox so localhost connections always work. Common commands: goto <url>, text [--limit N], screenshot [path], click <selector>, fill <selector> <value>, html [selector], snapshot, url, back, reload, scroll, js <expr>, console, network, tabs, newtab, closetab, stop.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Instance name' },
+        command: { type: 'string', description: 'Browse command (goto, text, screenshot, click, fill, html, snapshot, url, back, reload, scroll, js, console, network, tabs, newtab, closetab, stop, etc.)' },
+        args: { type: 'array', items: { type: 'string' }, description: 'Command arguments (e.g. ["https://example.com"] for goto, ["#submit"] for click)' },
+      },
+      required: ['name', 'command'],
+    },
+  },
+  {
     name: 'browse_login',
     description: 'Open a headed browser for the user to log into a site. After calling this, ask the user to log in, then call browse_login_complete to save the session.',
     inputSchema: {
@@ -91,6 +104,8 @@ async function handleToolCall(name, args) {
   switch (name) {
     case 'browse_start':
       return await handleStart(args);
+    case 'browse_command':
+      return await handleBrowseCommand(args);
     case 'browse_stop':
       return await handleStop(args);
     case 'browse_status':
@@ -165,7 +180,7 @@ async function handleStart({ name, session, headed = true }) {
       // Verify the server that responded is actually ours (not an orphaned process)
       const verify = await healthCheck(port, 2000);
       if (verify && verify.name === name) {
-        return { text: `Started "${name}" on port ${port} (pid: ${child.pid}). Use browse-multi commands in Bash now.` };
+        return { text: `Started "${name}" on port ${port} (pid: ${child.pid}). Use browse_command to send commands.` };
       }
       // Wrong instance on this port — our server likely failed to bind
       deleteState(name);
@@ -181,6 +196,33 @@ async function handleStart({ name, session, headed = true }) {
   }
 
   throw new Error(`Server failed to start after ${MAX_ATTEMPTS} attempts. Check logs in state directory.`);
+}
+
+async function handleBrowseCommand({ name, command, args = [] }) {
+  if (!name) throw new Error('name is required');
+  if (!command) throw new Error('command is required');
+
+  const state = readState(name);
+  if (!state) throw new Error(`Instance "${name}" not found. Start it first with browse_start.`);
+
+  const health = await healthCheck(state.port);
+  if (!health || !health.ok) {
+    deleteState(name);
+    throw new Error(`Instance "${name}" is not healthy (stale state cleaned up). Start it again with browse_start.`);
+  }
+
+  const result = await sendCommand(state.port, state.token, command, args);
+  if (!result.ok) {
+    throw new Error(result.error || `Command "${command}" failed`);
+  }
+
+  if (result.result === undefined || result.result === null) {
+    return { text: 'OK' };
+  }
+  const text = typeof result.result === 'string'
+    ? result.result
+    : JSON.stringify(result.result, null, 2);
+  return { text };
 }
 
 async function handleStop({ name } = {}) {
