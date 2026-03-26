@@ -139,7 +139,7 @@ async function startup() {
     // blocking login with "This browser or app may not be secure." Launching
     // Chrome directly avoids all of these signals.
     const { spawn: spawnChild } = await import('node:child_process');
-    const { mkdirSync, existsSync } = await import('node:fs');
+    const { existsSync } = await import('node:fs');
 
     // Find Chrome on macOS / Linux
     const chromePaths = [
@@ -150,8 +150,9 @@ async function startup() {
     const chromePath = chromePaths.find(p => existsSync(p));
     if (!chromePath) throw new Error('Google Chrome not found. Install Chrome for login support.');
 
-    const userDataDir = join(__dirname, '.login-profile');
-    mkdirSync(userDataDir, { recursive: true });
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const userDataDir = mkdtempSync(join(tmpdir(), 'browse-multi-login-'));
 
     // Use a port in the browse-multi range that won't collide with instance ports
     const cdpPort = 9450 + Math.floor(Math.random() * 30);
@@ -184,8 +185,13 @@ async function startup() {
     context = browser.contexts()[0];
     page = context.pages()[0] || await context.newPage();
 
-    // Ensure Chrome process is cleaned up on shutdown
-    chromeProc.on('exit', () => log('Chrome process exited'));
+    // Clean up Chrome process and temp profile on shutdown
+    const { rmSync } = await import('node:fs');
+    chromeProc.on('exit', () => {
+      log('Chrome process exited');
+      try { rmSync(userDataDir, { recursive: true, force: true }); } catch {}
+      log('Cleaned up login profile');
+    });
     process.on('exit', () => { try { chromeProc.kill(); } catch {} });
   } else {
     // Non-login instances use standard launch + ephemeral context
