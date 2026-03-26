@@ -222,7 +222,14 @@ async function handleBrowseCommand({ name, command, args = [] }) {
   const text = typeof result.result === 'string'
     ? result.result
     : JSON.stringify(result.result, null, 2);
-  return { text };
+  // Sanitize lone surrogates to prevent JSON encoding errors in downstream API calls.
+  // Lone surrogates (high without low, or low without high) are invalid in UTF-8/JSON
+  // and cause "no low surrogate in string" errors when the agent's context is serialized.
+  const sanitized = text.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '\uFFFD'
+  );
+  return { text: sanitized };
 }
 
 async function handleStop({ name } = {}) {
