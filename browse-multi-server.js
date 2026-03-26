@@ -130,24 +130,82 @@ registerSession(registerCommand);
 async function startup() {
   log(`Starting: port=${PORT} pid=${process.pid} session=${SESSION || 'none'}`);
 
-  browser = await chromium.launch({ headless: !HEADED });
+  const isLogin = NAME.startsWith('login-');
 
-  // On macOS, send headed browser windows to background so they don't steal focus
-  // Skip for login instances — user needs to interact with the window
-  if (HEADED && process.platform === 'darwin' && !NAME.startsWith('login-')) {
-    setTimeout(() => {
+  if (isLogin) {
+    // Launch Chrome as a vanilla browser (no Playwright automation flags) and
+    // connect via CDP. Playwright's launch mechanism injects automation signals
+    // (navigator.webdriver, --enable-automation) that sites like Google detect,
+    // blocking login with "This browser or app may not be secure." Launching
+    // Chrome directly avoids all of these signals.
+    const { spawn: spawnChild } = await import('node:child_process');
+    const { mkdirSync, existsSync } = await import('node:fs');
+
+    // Find Chrome on macOS / Linux
+    const chromePaths = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+    ];
+    const chromePath = chromePaths.find(p => existsSync(p));
+    if (!chromePath) throw new Error('Google Chrome not found. Install Chrome for login support.');
+
+    const userDataDir = join(__dirname, '.login-profile');
+    mkdirSync(userDataDir, { recursive: true });
+
+    // Use a port in the browse-multi range that won't collide with instance ports
+    const cdpPort = 9450 + Math.floor(Math.random() * 30);
+
+    const chromeArgs = [
+      `--remote-debugging-port=${cdpPort}`,
+      `--user-data-dir=${userDataDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-search-engine-choice-screen',
+      '--disable-infobars',
+    ];
+
+    const chromeProc = spawnChild(chromePath, chromeArgs, { stdio: 'ignore' });
+    log(`Launched Chrome directly: pid=${chromeProc.pid} cdpPort=${cdpPort}`);
+
+    // Wait for CDP to be ready
+    const cdpUrl = `http://127.0.0.1:${cdpPort}`;
+    let cdpReady = false;
+    for (let i = 0; i < 50; i++) {
       try {
-        execFileSync('osascript', ['-e', 'tell application "System Events" to set visible of process "Chromium" to false'], { timeout: 3000 });
-        log('Sent Chromium window to background');
+        const res = await fetch(`${cdpUrl}/json/version`);
+        if (res.ok) { cdpReady = true; break; }
       } catch {}
-    }, 1500);
+      await new Promise(r => setTimeout(r, 200));
+    }
+    if (!cdpReady) throw new Error(`Chrome CDP not ready on port ${cdpPort} after 10s`);
+
+    browser = await chromium.connectOverCDP(cdpUrl);
+    context = browser.contexts()[0];
+    page = context.pages()[0] || await context.newPage();
+
+    // Ensure Chrome process is cleaned up on shutdown
+    chromeProc.on('exit', () => log('Chrome process exited'));
+    process.on('exit', () => { try { chromeProc.kill(); } catch {} });
+  } else {
+    // Non-login instances use standard launch + ephemeral context
+    browser = await chromium.launch({ headless: !HEADED });
+
+    // On macOS, send headed browser windows to background so they don't steal focus
+    if (HEADED && process.platform === 'darwin') {
+      setTimeout(() => {
+        try {
+          execFileSync('osascript', ['-e', 'tell application "System Events" to set visible of process "Chromium" to false'], { timeout: 3000 });
+          log('Sent Chromium window to background');
+        } catch {}
+      }, 1500);
+    }
+
+    const contextOpts = {};
+    if (SESSION) contextOpts.storageState = SESSION;
+    context = await browser.newContext(contextOpts);
+    page = await context.newPage();
   }
-
-  const contextOpts = {};
-  if (SESSION) contextOpts.storageState = SESSION;
-  context = await browser.newContext(contextOpts);
-
-  page = await context.newPage();
 
   // Capture console messages
   page.on('console', msg => {
