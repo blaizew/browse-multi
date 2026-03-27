@@ -195,7 +195,7 @@ async function startup() {
     process.on('exit', () => { try { chromeProc.kill(); } catch {} });
   } else {
     // Non-login instances use standard launch + ephemeral context
-    browser = await chromium.launch({ headless: !HEADED });
+    browser = await chromium.launch({ headless: !HEADED, args: ['--window-size=1920,1080'] });
 
     // On macOS, send headed browser windows to background so they don't steal focus
     if (HEADED && process.platform === 'darwin') {
@@ -207,7 +207,7 @@ async function startup() {
       }, 1500);
     }
 
-    const contextOpts = {};
+    const contextOpts = { viewport: { width: 1920, height: 1080 } };
     if (SESSION) contextOpts.storageState = SESSION;
     context = await browser.newContext(contextOpts);
     page = await context.newPage();
