@@ -63,6 +63,7 @@ ALL browse-multi operations must go through MCP tools, which run outside the san
 # Lifecycle
 mcp__browse-multi__browse_start(name: "myagent")
 mcp__browse-multi__browse_start(name: "myagent", session: "~/.claude/sessions/x.com.json")
+mcp__browse-multi__browse_start(name: "myagent", viewport: "2560x1440")  # custom viewport size
 mcp__browse-multi__browse_stop(name: "myagent")
 mcp__browse-multi__browse_stop()  # stop all
 mcp__browse-multi__browse_status()

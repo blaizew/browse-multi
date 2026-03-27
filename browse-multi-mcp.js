@@ -44,6 +44,7 @@ const TOOLS = [
         name: { type: 'string', description: 'Instance name (unique per agent, e.g. "agent1", "research")' },
         session: { type: 'string', description: 'Path to session/cookie file for authenticated browsing (e.g. ~/.claude/sessions/x.com.json)' },
         headed: { type: 'boolean', description: 'Show browser window (default: true). Pass false for headless.' },
+        viewport: { type: 'string', description: 'Viewport size as "WIDTHxHEIGHT" (e.g. "1920x1080"). Default: 1920x1080.' },
       },
       required: ['name'],
     },
@@ -119,7 +120,7 @@ async function handleToolCall(name, args) {
   }
 }
 
-async function handleStart({ name, session, headed = true }) {
+async function handleStart({ name, session, headed = true, viewport }) {
   if (!name) throw new Error('name is required');
 
   // Resolve tilde in session path
@@ -164,6 +165,7 @@ async function handleStart({ name, session, headed = true }) {
     const serverArgs = ['--name', name, '--port', String(port), '--token', token];
     if (resolvedSession) serverArgs.push('--session', resolvedSession);
     if (headed) serverArgs.push('--headed');
+    if (viewport) serverArgs.push('--viewport', viewport);
 
     const child = spawn('node', [SERVER_SCRIPT, ...serverArgs], {
       detached: true,

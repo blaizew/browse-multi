@@ -24,6 +24,12 @@ const PORT = parseInt(getArg('port'), 10);
 const TOKEN = getArg('token');
 const SESSION = getArg('session');
 const HEADED = args.includes('--headed');
+const VIEWPORT_ARG = getArg('viewport'); // e.g. "1920x1080"
+const VIEWPORT = (() => {
+  if (!VIEWPORT_ARG) return { width: 1920, height: 1080 };
+  const [w, h] = VIEWPORT_ARG.split('x').map(Number);
+  return (w && h) ? { width: w, height: h } : { width: 1920, height: 1080 };
+})();
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_LOG_BYTES = 1024 * 1024; // 1MB
 
@@ -195,7 +201,7 @@ async function startup() {
     process.on('exit', () => { try { chromeProc.kill(); } catch {} });
   } else {
     // Non-login instances use standard launch + ephemeral context
-    browser = await chromium.launch({ headless: !HEADED, args: ['--window-size=1920,1080'] });
+    browser = await chromium.launch({ headless: !HEADED, args: [`--window-size=${VIEWPORT.width},${VIEWPORT.height}`] });
 
     // On macOS, send headed browser windows to background so they don't steal focus
     if (HEADED && process.platform === 'darwin') {
@@ -207,7 +213,7 @@ async function startup() {
       }, 1500);
     }
 
-    const contextOpts = { viewport: { width: 1920, height: 1080 } };
+    const contextOpts = { viewport: VIEWPORT };
     if (SESSION) contextOpts.storageState = SESSION;
     context = await browser.newContext(contextOpts);
     page = await context.newPage();
