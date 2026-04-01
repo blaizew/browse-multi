@@ -82,7 +82,7 @@ Each daemon is fully independent -- its own Chromium process, its own port, its 
 
 | Tool | Description |
 |------|-------------|
-| `browse_start` | Start a named Chromium instance (params: `name`, `session?`, `headed?`) |
+| `browse_start` | Start a named Chromium instance (params: `name`, `session?`, `headed?`, `viewport?`) |
 | `browse_command` | Send any command to a running instance (params: `name`, `command`, `args?`) |
 | `browse_stop` | Stop an instance or all instances (params: `name?`) |
 | `browse_status` | List all running instances with port, PID, and health |
@@ -275,6 +275,20 @@ browse_command(name: "agent1", command: "goto", args: ["https://mysite.com/dashb
 ```
 
 The `session` parameter only applies when the instance starts. To refresh expired sessions, stop the instance, re-login, and start again with the updated session file.
+
+## Viewport
+
+Default viewport is **1920x1080**. Override per-instance:
+
+```
+browse_start(name: "agent1", viewport: "2560x1440")
+```
+
+You can also resize the viewport at any time with the `resize` command:
+
+```
+browse_command(name: "agent1", command: "resize", args: ["375x812"])
+```
 
 ## Headed / headless mode
 
