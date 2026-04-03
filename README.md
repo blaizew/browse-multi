@@ -12,6 +12,8 @@ browse-multi solves this with **named instances**. Each agent gets its own persi
 
 ## Install
 
+### Claude Code
+
 Open Claude Code and paste this:
 
 ```
@@ -22,11 +24,42 @@ Claude will clone the repo, install Chromium, register the MCP server, and set u
 
 If `claude mcp add` fails from inside Claude Code, the setup script will print a command to run in a separate terminal.
 
-### What the setup does
+#### What the setup does
 
 1. `npm install` — installs Playwright and downloads Chromium locally
 2. `claude mcp add` — registers the MCP server so instances can start outside the sandbox
 3. The skill file (`SKILL.md`) at the repo root tells Claude Code when and how to use browse-multi
+
+### Other agent frameworks (Hermes, OpenClaw, custom agents)
+
+browse-multi works with any agent framework that supports MCP or can make HTTP calls. The setup:
+
+```bash
+# 1. Clone the repo wherever your agent keeps tools
+git clone https://github.com/blaizew/browse-multi.git /path/to/browse-multi
+
+# 2. Install dependencies (downloads Chromium)
+cd /path/to/browse-multi && npm install
+
+# 3. Set storage directories (important — defaults are Claude-Code-specific)
+export BROWSE_MULTI_SESSIONS_DIR="$HOME/.your-agent/sessions"
+# BROWSE_MULTI_STATE_DIR defaults to ~/.browse-multi (agent-neutral), usually fine as-is
+
+# 4. Start the MCP server
+node /path/to/browse-multi/browse-multi-mcp.js
+```
+
+For persistent configuration, put the env vars in a wrapper script:
+
+```bash
+#!/bin/bash
+export BROWSE_MULTI_SESSIONS_DIR="$HOME/.your-agent/sessions"
+exec node /path/to/browse-multi/browse-multi-mcp.js "$@"
+```
+
+Then register the wrapper with your agent framework's MCP configuration.
+
+**Why step 3 matters:** By default, session/cookie files are stored in `~/.claude/sessions/` — this is Claude Code's convention. If you're running under a different agent framework, set `BROWSE_MULTI_SESSIONS_DIR` to your agent's own directory so sessions are discoverable and don't create a confusing `~/.claude/` folder on the machine.
 
 ## Quick start
 
@@ -91,13 +124,13 @@ Each daemon is fully independent -- its own Chromium process, its own port, its 
 
 ### MCP setup
 
-The install script handles this automatically. To register manually:
+The install script handles this automatically. To register manually with Claude Code:
 
 ```bash
 claude mcp add browse-multi -- node /path/to/browse-multi/browse-multi-mcp.js
 ```
 
-Then restart Claude Code.
+Then restart Claude Code. For other agent frameworks, register `node /path/to/browse-multi/browse-multi-mcp.js` as an MCP server according to your framework's docs.
 
 ## Commands
 
@@ -252,7 +285,7 @@ browse_command(name: "a1", command: "fill", args: ["@e3", "search query"])
 
 ## Authenticated browsing
 
-Sessions are stored in the sessions directory (`~/.claude/sessions/<domain>.json` by default) and can be shared across instances.
+Sessions are stored in the sessions directory (`$BROWSE_MULTI_SESSIONS_DIR/<domain>.json`, defaulting to `~/.claude/sessions/`) and can be shared across instances.
 
 ### Login flow
 
@@ -378,22 +411,23 @@ Port and token are stored in the state file at `~/.browse-multi/browse-multi-{na
 | Environment variable | Default | Description |
 |---------------------|---------|-------------|
 | `BROWSE_MULTI_STATE_DIR` | `~/.browse-multi` | Directory for state files, logs, and default screenshots |
-| `BROWSE_MULTI_SESSIONS_DIR` | `~/.claude/sessions` | Directory for saved session/cookie files |
+| `BROWSE_MULTI_SESSIONS_DIR` | `~/.claude/sessions` | Directory for saved session/cookie files. **Claude-Code-specific default** — set this if using a different agent framework (see [Install > Other agent frameworks](#other-agent-frameworks-hermes-openclaw-custom-agents)). |
 
 To set env vars for the MCP server, use a wrapper script:
 
 ```bash
 #!/bin/bash
-export BROWSE_MULTI_STATE_DIR="$HOME/my-custom-state-dir"
-export BROWSE_MULTI_SESSIONS_DIR="$HOME/my-custom-sessions-dir"
+export BROWSE_MULTI_SESSIONS_DIR="$HOME/.your-agent/sessions"
 exec node /path/to/browse-multi/browse-multi-mcp.js "$@"
 ```
 
-Then register the wrapper as the MCP command:
+Then register the wrapper as the MCP command. For Claude Code:
 
 ```bash
 claude mcp add browse-multi -- /path/to/wrapper.sh
 ```
+
+For other frameworks, register the wrapper according to your agent's MCP configuration docs.
 
 ## Troubleshooting
 

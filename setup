@@ -7,19 +7,38 @@ echo "Installing dependencies and Chromium..."
 cd "$SCRIPT_DIR"
 npm install
 
-echo ""
-echo "Registering MCP server..."
-if claude mcp add browse-multi -- node "$SCRIPT_DIR/browse-multi-mcp.js" 2>/dev/null; then
-  echo "MCP server registered."
+# Detect whether Claude Code is available
+if command -v claude &>/dev/null; then
+  echo ""
+  echo "Registering MCP server with Claude Code..."
+  if claude mcp add browse-multi -- node "$SCRIPT_DIR/browse-multi-mcp.js" 2>/dev/null; then
+    echo "MCP server registered."
+  else
+    echo ""
+    echo "Could not register MCP server from inside Claude Code."
+    echo "Run this in a separate terminal:"
+    echo ""
+    echo "  claude mcp add browse-multi -- node $SCRIPT_DIR/browse-multi-mcp.js"
+    echo ""
+  fi
+
+  echo ""
+  echo "Restart Claude Code to activate the MCP server and skill."
+  echo "Once restarted, Claude will automatically use browse-multi when agents need browser access."
 else
   echo ""
-  echo "Could not register MCP server from inside Claude Code."
-  echo "Run this in a separate terminal:"
+  echo "Claude Code not detected — skipping MCP registration."
   echo ""
-  echo "  claude mcp add browse-multi -- node $SCRIPT_DIR/browse-multi-mcp.js"
+  echo "To use browse-multi with your agent framework:"
   echo ""
+  echo "  1. Register this as an MCP server with your agent:"
+  echo "     node $SCRIPT_DIR/browse-multi-mcp.js"
+  echo ""
+  echo "  2. Set BROWSE_MULTI_SESSIONS_DIR to your agent's session directory."
+  echo "     The default (~/.claude/sessions/) is Claude-Code-specific."
+  echo "     Example:"
+  echo ""
+  echo "       export BROWSE_MULTI_SESSIONS_DIR=\"\$HOME/.your-agent/sessions\""
+  echo ""
+  echo "     Or use a wrapper script — see README.md for details."
 fi
-
-echo ""
-echo "Restart Claude Code to activate the MCP server and skill."
-echo "Once restarted, Claude will automatically use browse-multi when agents need browser access."
