@@ -32,7 +32,7 @@ If `claude mcp add` fails from inside Claude Code, the setup script will print a
 
 ### Other agent frameworks (Hermes, OpenClaw, custom agents)
 
-browse-multi works with any agent framework that supports MCP or can make HTTP calls. The setup:
+browse-multi works with any agent framework that supports MCP or can make HTTP calls (CLI). The setup:
 
 ```bash
 # 1. Clone the repo wherever your agent keeps tools
@@ -40,16 +40,23 @@ git clone https://github.com/blaizew/browse-multi.git /path/to/browse-multi
 
 # 2. Install dependencies (downloads Chromium)
 cd /path/to/browse-multi && npm install
-
-# 3. Set storage directories (important — defaults are Claude-Code-specific)
-export BROWSE_MULTI_SESSIONS_DIR="$HOME/.your-agent/sessions"
-# BROWSE_MULTI_STATE_DIR defaults to ~/.browse-multi (agent-neutral), usually fine as-is
-
-# 4. Start the MCP server
-node /path/to/browse-multi/browse-multi-mcp.js
 ```
 
-For persistent configuration, put the env vars in a wrapper script:
+**Important: configure your session directory.** By default, session/cookie files are stored in `~/.claude/sessions/` — this is a Claude Code convention. If you're running under a different agent framework, set `BROWSE_MULTI_SESSIONS_DIR` so sessions live in your agent's own directory instead of creating a confusing `~/.claude/` folder.
+
+The env var works the same whether you use browse-multi via MCP or CLI. How you set it depends on your setup:
+
+**Option A: Agent framework `.env` file** (simplest if your framework loads one)
+
+If your agent loads a `.env` file at startup (e.g., Hermes loads `~/.hermes/.env`), just add:
+
+```
+BROWSE_MULTI_SESSIONS_DIR=$HOME/.hermes/sessions
+```
+
+This covers both MCP and CLI usage since the env var is in the process environment for all commands.
+
+**Option B: Wrapper script** (useful if you want to isolate the config to browse-multi)
 
 ```bash
 #!/bin/bash
@@ -57,9 +64,15 @@ export BROWSE_MULTI_SESSIONS_DIR="$HOME/.your-agent/sessions"
 exec node /path/to/browse-multi/browse-multi-mcp.js "$@"
 ```
 
-Then register the wrapper with your agent framework's MCP configuration.
+Then use the wrapper instead of calling node directly, and register it as your MCP command.
 
-**Why step 3 matters:** By default, session/cookie files are stored in `~/.claude/sessions/` — this is Claude Code's convention. If you're running under a different agent framework, set `BROWSE_MULTI_SESSIONS_DIR` to your agent's own directory so sessions are discoverable and don't create a confusing `~/.claude/` folder on the machine.
+**Option C: Shell profile** (`~/.bashrc`, `~/.zshrc`)
+
+```bash
+export BROWSE_MULTI_SESSIONS_DIR="$HOME/.your-agent/sessions"
+```
+
+This sets it globally for all terminal sessions.
 
 ## Quick start
 
@@ -413,21 +426,7 @@ Port and token are stored in the state file at `~/.browse-multi/browse-multi-{na
 | `BROWSE_MULTI_STATE_DIR` | `~/.browse-multi` | Directory for state files, logs, and default screenshots |
 | `BROWSE_MULTI_SESSIONS_DIR` | `~/.claude/sessions` | Directory for saved session/cookie files. **Claude-Code-specific default** — set this if using a different agent framework (see [Install > Other agent frameworks](#other-agent-frameworks-hermes-openclaw-custom-agents)). |
 
-To set env vars for the MCP server, use a wrapper script:
-
-```bash
-#!/bin/bash
-export BROWSE_MULTI_SESSIONS_DIR="$HOME/.your-agent/sessions"
-exec node /path/to/browse-multi/browse-multi-mcp.js "$@"
-```
-
-Then register the wrapper as the MCP command. For Claude Code:
-
-```bash
-claude mcp add browse-multi -- /path/to/wrapper.sh
-```
-
-For other frameworks, register the wrapper according to your agent's MCP configuration docs.
+These env vars just need to be set in the process environment when browse-multi starts — via your framework's `.env` file, a wrapper script, or your shell profile. See [Install > Other agent frameworks](#other-agent-frameworks-hermes-openclaw-custom-agents) for options.
 
 ## Troubleshooting
 
