@@ -436,7 +436,7 @@ These env vars just need to be set in the process environment when browse-multi 
 
 **"@eN not found"** -- Refs are stale. Run `snapshot` again after any navigation.
 
-**Stale instances** -- `browse_status` auto-cleans dead instances.
+**Stale instances** -- `browse_status` is read-only: it reports `DEAD` (process gone) vs `UNRESPONSIVE` (pid alive but busy) but never deletes. Clean up dead ones with `browse_stop "<name>"`. (An instance counts as dead only when its OS process is gone — not when a single health probe is slow — so a busy instance is never auto-evicted.)
 
 **Instance won't stop** -- Kill the process manually. Check PID in the state file.
 

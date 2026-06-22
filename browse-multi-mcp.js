@@ -51,11 +51,12 @@ const TOOLS = [
   },
   {
     name: 'browse_stop',
-    description: 'Stop a browse-multi instance or all instances.',
+    description: 'Stop a browse-multi instance by name. To stop EVERY instance (across all sessions — instances are a shared pool), pass all:true explicitly. Omitting both is an error, so a stray call can never tear down other sessions\' browsers.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Instance name to stop. Omit to stop all.' },
+        name: { type: 'string', description: 'Instance name to stop.' },
+        all: { type: 'boolean', description: 'Stop ALL instances across all sessions. Must be set true explicitly; there is no implicit stop-all.' },
       },
     },
   },
@@ -245,9 +246,12 @@ async function handleBrowseCommand({ name, command, args = [] }) {
   return { text: sanitized };
 }
 
-async function handleStop({ name } = {}) {
-  if (!name) {
-    // Stop all
+async function handleStop({ name, all } = {}) {
+  if (!name && !all) {
+    throw new Error('browse_stop needs a name (to stop one instance) or all:true (to stop EVERY instance across all sessions — instances are a shared pool). Refusing an implicit stop-all.');
+  }
+  if (all) {
+    // Stop all — only on explicit all:true, never implicitly (it tears down other sessions too).
     const states = listAllStates();
     if (states.length === 0) return { text: 'No running instances.' };
     const results = [];

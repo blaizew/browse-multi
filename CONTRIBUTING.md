@@ -181,7 +181,11 @@ When adding a new command, add a corresponding test to `test-smoke.sh`.
 
 **"It works in my session but not in a sub-agent"** — The sub-agent is sandboxed. Seatbelt blocks localhost TCP. The sub-agent must use MCP tools (`browse_command`), not the CLI. This is the #1 cause of failures.
 
-**"Port already in use"** — A previous instance didn't shut down cleanly. Run `browse_status` (it auto-cleans dead instances) or manually delete state files in `$BROWSE_MULTI_STATE_DIR`.
+**"Port already in use"** — A previous instance didn't shut down cleanly. Run `browse_status` to see which instances are `DEAD` (process gone), then `browse_stop "<name>"` to clean them up, or manually delete state files in `$BROWSE_MULTI_STATE_DIR`. (`browse_status` is read-only — it reports state but never deletes; see the liveness pitfall below.)
+
+**Never delete state on a transient health-check failure** — Instances are a **shared pool across all Claude Code sessions** (one `$BROWSE_MULTI_STATE_DIR`, ports 9400–9420). A `/health` probe can time out on a *busy* instance (mid-command, or CPU-contended when several headed Chromes run at once) without the instance being dead. Treating one failed probe as death and calling `deleteState()` orphans a live instance — Chrome keeps running but the state file is gone, so every later call returns "Instance not found." Worse, because `browse_status`/`browse_command` iterate the whole shared pool, one session could evict another session's busy instance. **Rule:** an instance is dead only when its OS process is gone (`pidAlive()` via `process.kill(pid, 0)`), not when a probe fails. Use `isReachable()` (retried probe) for liveness, gate every `deleteState()` on `!pidAlive(pid)`, and keep `browse_status` read-only. (Regression fixed 2026-06; see `lib/instance.js` `pidAlive`/`isReachable`.)
+
+**`browse_stop` never stops-all implicitly** — Stopping every instance tears down *other sessions'* browsers too (shared pool). `browse_stop` requires either a `name` or an explicit `all:true`; omitting both is an error by design. Don't reintroduce an implicit no-arg stop-all.
 
 **"Login blocked by Google/Gmail"** — The login mode uses direct Chrome launch via CDP to avoid Playwright automation flags. If you're seeing "This browser may not be secure," the login path isn't being triggered. Check that the instance name starts with `login-`.
 
