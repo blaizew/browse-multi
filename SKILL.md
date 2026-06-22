@@ -65,7 +65,16 @@ mcp__browse-multi__browse_start(name: "myagent")
 mcp__browse-multi__browse_start(name: "myagent", session: "~/.claude/sessions/x.com.json")
 mcp__browse-multi__browse_start(name: "myagent", viewport: "2560x1440")  # custom viewport size
 mcp__browse-multi__browse_stop(name: "myagent")
-mcp__browse-multi__browse_stop()  # stop all
+mcp__browse-multi__browse_stop(all: true)  # stop ALL instances — DANGER: the pool is shared across concurrent
+                                  # agents/sessions, so this kills OTHER agents' instances too. Must be explicit:
+                                  # a bare browse_stop() now ERRORS by design (no implicit stop-all). Only ever
+                                  # stop your own by name. (Incident 2026-06-17.)
+# NEVER `pkill -f browse-multi` / `kill` these processes from the shell. The browse-multi MCP SERVER
+# (browse-multi-mcp.js) is shared by EVERY concurrent session — a broad pkill takes browse-multi down for
+# ALL agents at once AND drops the MCP tools from your own session with no clean in-session reconnect (you
+# can't re-handshake a stdio MCP mid-session). If an instance misbehaves: browse_stop(name) then
+# browse_start(name) — never pkill, and never a bare `pkill -f`. (Incident 2026-06-17: a pkill aimed at
+# crashing Chromium daemons killed the shared server and disconnected the other agents.)
 mcp__browse-multi__browse_status()
 
 # Browsing — use browse_command for ALL commands (goto, text, click, etc.)
@@ -371,6 +380,8 @@ This CLI runs alongside Playwright MCP, not replacing it:
 - **"No free ports"** — Too many instances. Run `status` and `stop` idle ones.
 - **"Server failed to start"** — Check `~/.browse-multi/browse-multi-{name}.log`.
 - **"@eN not found"** — Refs are stale. Run `snapshot` again after navigation.
-- **Stale state files** — `status` auto-cleans dead instances.
+- **Stale state files** — `status` is read-only (reports DEAD vs UNRESPONSIVE, never deletes); clean up with `browse_stop "<name>"`. An instance is dead only when its process is gone, not on a slow health probe — so a busy instance is never auto-evicted.
 - **Instance won't stop** — Kill the process: check PID in `~/.browse-multi/browse-multi-{name}.json`.
 - **Auth not working** — Re-login via `browse_login` flow when auth fails.
+- **Hover-triggered UI (tooltips/popovers) won't open from JS** — Dispatching synthetic mouse events (`el.dispatchEvent(new MouseEvent('mouseover'/'mouseenter'))`) does NOT trigger React's `onMouseEnter` (React derives enter/leave from real pointer movement with relatedTarget). Use the real `hover` command instead: tag the target with an `id` via a `js` call, then `hover "#that-id"`, then verify the popover is in the DOM before `screenshot`. (Learned 2026-06-21 capturing Gluefi InfoTip popovers.)
+- **React route/nav changes are async** — after a `js` dispatch-click that navigates, the DOM re-renders on a later tick. Re-query (e.g. read the new `h1`) in a SEPARATE `browse_command` call, not the same one, or you'll read the pre-nav DOM.
