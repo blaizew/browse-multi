@@ -12,7 +12,7 @@ import { writeFileSync, unlinkSync } from 'node:fs';
 import {
   readState, allocatePort, generateToken, writeStateAtomic,
   deleteState, healthCheck, waitForReady, sendCommand, listAllStates,
-  sessionsDir, sessionFilePath, resolvePath
+  sessionsDir, sessionFilePath, resolvePath, pidAlive, isReachable
 } from './lib/instance.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -129,9 +129,14 @@ async function handleStart({ name, session, headed = true, viewport }) {
   // Check if already running
   const existing = readState(name);
   if (existing) {
-    const health = await healthCheck(existing.port);
+    const health = await isReachable(existing.port);
     if (health && health.ok) {
       return { text: `Instance "${name}" already running on port ${existing.port} (uptime: ${health.uptime}s)` };
+    }
+    // Unreachable but pid still alive => busy/contended, not dead. Don't evict it or spawn a
+    // duplicate on top of it (that races on its port). Only reclaim the name if the process is gone.
+    if (pidAlive(existing.pid)) {
+      return { text: `Instance "${name}" (pid ${existing.pid}) exists but isn't responding — likely busy/CPU-contended. Not starting a duplicate; retry shortly, or browse_stop "${name}" first.` };
     }
     deleteState(name);
   }
@@ -207,10 +212,16 @@ async function handleBrowseCommand({ name, command, args = [] }) {
   const state = readState(name);
   if (!state) throw new Error(`Instance "${name}" not found. Start it first with browse_start.`);
 
-  const health = await healthCheck(state.port);
-  if (!health || !health.ok) {
+  const health = await isReachable(state.port);
+  if (!health) {
+    // A single failed 2s probe is NOT proof of death — a busy/CPU-contended instance can miss it.
+    // Only clean up when the process is actually gone; otherwise preserve state so a transient
+    // blip can't orphan a live instance (the cross-session eviction bug).
+    if (pidAlive(state.pid)) {
+      throw new Error(`Instance "${name}" (pid ${state.pid}) is alive but not responding right now — likely busy or CPU-contended (e.g. several headed Chromes at once). State preserved; retry shortly.`);
+    }
     deleteState(name);
-    throw new Error(`Instance "${name}" is not healthy (stale state cleaned up). Start it again with browse_start.`);
+    throw new Error(`Instance "${name}" process is gone (stale state cleaned up). Start it again with browse_start.`);
   }
 
   const result = await sendCommand(state.port, state.token, command, args);
@@ -245,8 +256,9 @@ async function handleStop({ name } = {}) {
         await sendCommand(s.port, s.token, 'stop', []);
         results.push(`Stopped: ${s.name}`);
       } catch {
+        if (pidAlive(s.pid)) { try { process.kill(s.pid); } catch {} }
         deleteState(s.name);
-        results.push(`${s.name}: cleaned up stale state`);
+        results.push(`${s.name}: force-stopped / cleaned up`);
       }
     }
     return { text: results.join('\n') };
@@ -257,8 +269,11 @@ async function handleStop({ name } = {}) {
 
   const health = await healthCheck(state.port);
   if (!health || !health.ok) {
+    // Explicit stop: if the process is still alive but unresponsive, kill it so we don't leak an
+    // orphaned Chrome, then clear state. (Unlike status/command, stop is meant to remove it.)
+    if (pidAlive(state.pid)) { try { process.kill(state.pid); } catch {} }
     deleteState(name);
-    return { text: `Cleaned up stale state for "${name}".` };
+    return { text: `Cleaned up "${name}" (was unresponsive).` };
   }
 
   try {
@@ -277,9 +292,13 @@ async function handleStatus() {
   const lines = [];
   for (const s of states) {
     const health = await healthCheck(s.port);
-    const status = health && health.ok ? `UP (uptime: ${health.uptime}s)` : 'DEAD';
+    let status;
+    if (health && health.ok) status = `UP (uptime: ${health.uptime}s)`;
+    else if (pidAlive(s.pid)) status = 'UNRESPONSIVE (pid alive — likely busy)';
+    else status = 'DEAD (process gone — browse_stop to clean up)';
+    // Read-only: status must never garbage-collect. Deleting here let any session evict another
+    // session's busy instance on a transient health blip. Cleanup is now explicit (browse_stop).
     lines.push(`${s.name}\tport:${s.port}\tpid:${s.pid}\t${status}`);
-    if (status === 'DEAD') deleteState(s.name);
   }
   return { text: lines.join('\n') };
 }
