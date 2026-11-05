@@ -1,0 +1,27 @@
+# Dependabot: automated dependency update pull requests.
+# Policy (2026-11-04): keep exact versions in the lockfile, let Dependabot propose
+# updates, and review each PR before it merges (a merge to the default branch may deploy).
+# Security updates are switched on in the repo settings; they ignore the cooldown
+# below and open as soon as GitHub publishes an advisory.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    cooldown:
+      default-days: 7
+      semver-patch-days: 3
+      semver-minor-days: 7
+      semver-major-days: 30
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
